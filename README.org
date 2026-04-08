@@ -1,32 +1,24 @@
-[![Clojars Project](https://img.shields.io/clojars/v/org.clojars.bzg/mailseq.svg)](https://clojars.org/org.clojars.bzg/mailseq)
+#+title: mailseq: Clojure lib for reading and parsing mailboxes
 
-# mailseq
+[[https://clojars.org/org.clojars.bzg/mailseq][https://img.shields.io/clojars/v/org.clojars.bzg/mailseq.svg]]
 
-A minimal, read-only Clojure library for fetching and parsing IMAP email.
-
-Built on [Eclipse Angus Mail](https://eclipse-ee4j.github.io/angus-mail/) (the modern successor to JavaMail), `mailseq` provides a data-oriented API: maps in, maps out.
-
-## Status
-
-Early development — API may change before 1.0.
-
-## Installation
+* Installation
 
 deps.edn:
 
-```clojure
+#+begin_src clojure
 org.clojars.bzg/mailseq {:mvn/version "0.0.1"}
-```
+#+end_src
 
 Leiningen:
 
-```clojure
+#+begin_src clojure
 [org.clojars.bzg/mailseq "0.0.1"]
-```
+#+end_src
 
-## Quick start
+* Quick start
 
-```clojure
+#+begin_src clojure
 (require '[mailseq.core :as imap]
          '[mailseq.fetch :as fetch])
 
@@ -35,11 +27,11 @@ Leiningen:
                              :user "me@example.com"
                              :password "secret"}]
   (fetch/messages conn "INBOX" {:limit 10}))
-```
+#+end_src
 
 Each message is returned as a Clojure map:
 
-```clojure
+#+begin_src clojure
 {:uid            12345
  :message-id     "<abc@example.com>"
  :from           [{:name "Alice" :address "alice@example.com"}]
@@ -59,13 +51,13 @@ Each message is returned as a Clojure map:
                                  :size 14023
                                  :data #object[byte[] ...]}]}
  :headers        {"Subject" "Hello from mailseq" ...}}
-```
+#+end_src
 
-## API
+* API
 
-### Connection (`mailseq.core`)
+** Connection (=mailseq.core=)
 
-```clojure
+#+begin_src clojure
 ;; Connect
 (def conn (imap/connect {:host "imap.example.com"
                          :port 993
@@ -82,13 +74,13 @@ Each message is returned as a Clojure map:
 ;; Or use the macro for automatic cleanup
 (imap/with-connection [conn {...}]
   ...)
-```
+#+end_src
 
-OAuth2 is supported — pass `:oauth2-token` instead of `:password`.
+OAuth2 is supported — pass =:oauth2-token= instead of =:password=.
 
-### Fetching messages (`mailseq.fetch`)
+** Fetching messages (=mailseq.fetch=)
 
-```clojure
+#+begin_src clojure
 ;; Fetch recent messages
 (fetch/messages conn "INBOX" {:limit 20})
 
@@ -105,11 +97,11 @@ OAuth2 is supported — pass `:oauth2-token` instead of `:password`.
 (fetch/messages conn "INBOX" {:limit 100
                                :body? false
                                :headers? false})
-```
+#+end_src
 
-### Folders (`mailseq.folder`)
+** Folders (=mailseq.folder=)
 
-```clojure
+#+begin_src clojure
 (require '[mailseq.folder :as folder])
 
 (folder/list-folders conn)
@@ -118,11 +110,11 @@ OAuth2 is supported — pass `:oauth2-token` instead of `:password`.
 
 (folder/message-count conn "INBOX")  ;; => 1042
 (folder/unread-count conn "INBOX")   ;; => 3
-```
+#+end_src
 
-### IDLE / push notifications (`mailseq.idle`)
+** IDLE / push notifications (=mailseq.idle=)
 
-```clojure
+#+begin_src clojure
 (require '[mailseq.idle :as idle])
 
 ;; Blocking — run in a future or thread
@@ -133,19 +125,19 @@ OAuth2 is supported — pass `:oauth2-token` instead of `:password`.
 
 ;; Stop with:
 (.interrupt idle-thread)
-```
+#+end_src
 
-## Design principles
+* Design principles
 
-- **Read-only** — no sending, writing, moving, or deleting
-- **Data-oriented** — all inputs and outputs are plain Clojure maps
-- **Minimal API surface** — fewer functions means less to maintain and learn
-- **Thin wrapper** — for advanced use cases, interop with Jakarta Mail directly
-- **Zero extra dependencies** — only Eclipse Angus Mail, nothing else
+- *Read-only* — no sending, writing, moving, or deleting
+- *Data-oriented* — all inputs and outputs are plain Clojure maps
+- *Minimal API surface* — fewer functions means less to maintain and learn
+- *Thin wrapper* — for advanced use cases, interop with Jakarta Mail directly
+- *Zero extra dependencies* — only Eclipse Angus Mail, nothing else
 
-## Building & deploying
+* Building & deploying
 
-```bash
+#+begin_src bash
 # Run tests
 clj -X:test cognitect.test-runner.api/test
 
@@ -157,25 +149,24 @@ clj -T:build install
 
 # Deploy to Clojars
 clj -T:build deploy
-```
+#+end_src
 
-## Contributing
+* Contributing
 
-- Send a [bug report](mailto:~bzg/dev@lists.sr.ht) with `[BUG] mailseq: <SHORT EXPLICIT BUG DESCRIPTION>`{.verbatim}
-- Send a [patch](mailto:~bzg/dev@lists.sr.ht) with `[PATCH] mailseq: <COMMIT SUMMARY>`{.verbatim}
-- Send a [feature request](mailto:~bzg/dev@lists.sr.ht) with `[FR] mailseq: <FEATURE REQUEST>`{.verbatim}
-- Share any [other question or idea](mailto:~bzg/dev@lists.sr.ht)
+- Send a [[mailto:~bzg/dev@lists.sr.ht][bug report]] with =[BUG] mailseq: <SHORT EXPLICIT BUG DESCRIPTION>=
+- Send a [[mailto:~bzg/dev@lists.sr.ht][patch]] with =[PATCH] mailseq: <COMMIT SUMMARY>=
+- Send a [[mailto:~bzg/dev@lists.sr.ht][feature request]] with =[FR] mailseq: <FEATURE REQUEST>=
+- Share any [[mailto:~bzg/dev@lists.sr.ht][other question or idea]]
 
-You can also [send me an email](mailto:bzg@bzg.fr) and support my work
-on [liberapay](https://liberapay.com/bzg/).
+You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work
+on [[https://liberapay.com/bzg/][liberapay]].
 
-
-## Support the Clojure(script) ecosystem
+* Support the Clojure(script) ecosystem
 
 If you like Clojure(script), please consider supporting maintainers by
-donating to [clojuriststogether.org](https://clojuriststogether.org).
+donating to [[https://clojuriststogether.org][clojuriststogether.org]].
 
-## License
+* License
 
 Copyright © 2026 Bastien Guerry
 
