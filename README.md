@@ -30,11 +30,11 @@ Leiningen:
 (require '[fetch-imap.core :as imap]
          '[fetch-imap.fetch :as fetch])
 
-;; Connect and fetch the 5 most recent unread messages
+;; Connect and fetch the 10 most recent messages
 (imap/with-connection [conn {:host "imap.example.com"
                              :user "me@example.com"
                              :password "secret"}]
-  (fetch/messages conn "INBOX" {:limit 10 :unseen true}))
+  (fetch/messages conn "INBOX" {:limit 10}))
 ```
 
 Each message is returned as a Clojure map:
@@ -92,16 +92,14 @@ OAuth2 is supported — pass `:oauth2-token` instead of `:password`.
 ;; Fetch recent messages
 (fetch/messages conn "INBOX" {:limit 20})
 
-;; Search with criteria (AND-ed together)
-(fetch/messages conn "INBOX" {:from "alice@example.com"
-                               :since "2025-01-01"
-                               :unseen true})
+;; Fetch by date range
+(fetch/messages conn "INBOX" {:since "2025-01-01" :before "2025-02-01"})
 
-;; Fetch by UID
+;; Fetch by UID (e.g. relative to the last UID you saw)
 (fetch/by-uid conn "INBOX" [12345 12346])
 
-;; Fetch by UID range
-(fetch/by-uid-range conn "INBOX" 1000 2000)
+;; Fetch everything newer than a known UID
+(fetch/by-uid-range conn "INBOX" 12347 jakarta.mail.UIDFolder/LASTUID)
 
 ;; Lightweight fetch (skip body parsing)
 (fetch/messages conn "INBOX" {:limit 100
