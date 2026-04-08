@@ -2,11 +2,11 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns fetch-imap.core
+(ns mailseq.core
   "IMAP connection management.
 
   Connect to an IMAP server and obtain a store that can be passed
-  to functions in fetch-imap.folder and fetch-imap.fetch."
+  to functions in mailseq.folder and mailseq.fetch."
   (:import [jakarta.mail Session Store Folder]
            [java.util Properties]))
 

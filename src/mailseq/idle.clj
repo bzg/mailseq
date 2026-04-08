@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns fetch-imap.idle
+(ns mailseq.idle
   "IMAP IDLE support for receiving push notifications when new messages arrive.
 
   IDLE keeps a connection open and the server notifies the client when
@@ -10,8 +10,8 @@
 
   A heartbeat thread periodically breaks out of IDLE to force a NOOP
   roundtrip, preventing NATs/firewalls/servers from killing the connection."
-  (:require [fetch-imap.folder :as folder]
-            [fetch-imap.parse :as parse])
+  (:require [mailseq.folder :as folder]
+            [mailseq.parse :as parse])
   (:import [jakarta.mail Folder Store MessagingException]
            [jakarta.mail.event MessageCountListener MessageCountEvent]
            [org.eclipse.angus.mail.imap IMAPFolder]))
@@ -57,7 +57,7 @@
                    nil)
                  (catch Exception e
                    (on-error e)))))
-           "fetch-imap-heartbeat")]
+           "mailseq-heartbeat")]
     (.setDaemon t true)
     (.start t)
     t))
@@ -137,7 +137,7 @@
   ([conn folder-name on-message] (idle-async conn folder-name on-message {}))
   ([conn folder-name on-message opts]
    (let [t (Thread. ^Runnable (fn [] (idle conn folder-name on-message opts))
-                    (str "fetch-imap-idle-" folder-name))]
+                    (str "mailseq-idle-" folder-name))]
      (.setDaemon t true)
      (.start t)
      t)))

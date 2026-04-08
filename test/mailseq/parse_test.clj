@@ -2,14 +2,14 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns fetch-imap.parse-test
-  "Unit tests for fetch-imap.parse.
+(ns mailseq.parse-test
+  "Unit tests for mailseq.parse.
 
   These tests use .eml files loaded as MimeMessage objects — no IMAP
   server required."
   (:require [clojure.test :refer [deftest testing is]]
             [clojure.java.io :as io]
-            [fetch-imap.parse :as parse])
+            [mailseq.parse :as parse])
   (:import [jakarta.mail Session]
            [jakarta.mail.internet MimeMessage]
            [java.util Properties]))

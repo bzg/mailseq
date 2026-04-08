@@ -1,10 +1,10 @@
-[![Clojars Project](https://img.shields.io/clojars/v/org.clojars.bzg/fetch-imap.svg)](https://clojars.org/org.clojars.bzg/fetch-imap)
+[![Clojars Project](https://img.shields.io/clojars/v/org.clojars.bzg/mailseq.svg)](https://clojars.org/org.clojars.bzg/mailseq)
 
-# fetch-imap
+# mailseq
 
 A minimal, read-only Clojure library for fetching and parsing IMAP email.
 
-Built on [Eclipse Angus Mail](https://eclipse-ee4j.github.io/angus-mail/) (the modern successor to JavaMail), `fetch-imap` provides a data-oriented API: maps in, maps out.
+Built on [Eclipse Angus Mail](https://eclipse-ee4j.github.io/angus-mail/) (the modern successor to JavaMail), `mailseq` provides a data-oriented API: maps in, maps out.
 
 ## Status
 
@@ -15,20 +15,20 @@ Early development — API may change before 1.0.
 deps.edn:
 
 ```clojure
-org.clojars.bzg/fetch-imap {:mvn/version "0.1.0"}
+org.clojars.bzg/mailseq {:mvn/version "0.1.0"}
 ```
 
 Leiningen:
 
 ```clojure
-[org.clojars.bzg/fetch-imap "0.1.0"]
+[org.clojars.bzg/mailseq "0.1.0"]
 ```
 
 ## Quick start
 
 ```clojure
-(require '[fetch-imap.core :as imap]
-         '[fetch-imap.fetch :as fetch])
+(require '[mailseq.core :as imap]
+         '[mailseq.fetch :as fetch])
 
 ;; Connect and fetch the 10 most recent messages
 (imap/with-connection [conn {:host "imap.example.com"
@@ -47,7 +47,7 @@ Each message is returned as a Clojure map:
  :cc             []
  :bcc            nil
  :reply-to       [{:name "Alice" :address "alice@example.com"}]
- :subject        "Hello from fetch-imap"
+ :subject        "Hello from mailseq"
  :date-sent      #inst "2025-02-15T10:30:00.000-00:00"
  :date-received  #inst "2025-02-15T10:30:02.000-00:00"
  :content-type   "multipart/alternative; boundary=..."
@@ -58,12 +58,12 @@ Each message is returned as a Clojure map:
                                  :content-type "application/pdf"
                                  :size 14023
                                  :data #object[byte[] ...]}]}
- :headers        {"Subject" "Hello from fetch-imap" ...}}
+ :headers        {"Subject" "Hello from mailseq" ...}}
 ```
 
 ## API
 
-### Connection (`fetch-imap.core`)
+### Connection (`mailseq.core`)
 
 ```clojure
 ;; Connect
@@ -86,7 +86,7 @@ Each message is returned as a Clojure map:
 
 OAuth2 is supported — pass `:oauth2-token` instead of `:password`.
 
-### Fetching messages (`fetch-imap.fetch`)
+### Fetching messages (`mailseq.fetch`)
 
 ```clojure
 ;; Fetch recent messages
@@ -107,10 +107,10 @@ OAuth2 is supported — pass `:oauth2-token` instead of `:password`.
                                :headers? false})
 ```
 
-### Folders (`fetch-imap.folder`)
+### Folders (`mailseq.folder`)
 
 ```clojure
-(require '[fetch-imap.folder :as folder])
+(require '[mailseq.folder :as folder])
 
 (folder/list-folders conn)
 ;; => [{:name "INBOX" :full-name "INBOX" :type :holds-messages
@@ -120,10 +120,10 @@ OAuth2 is supported — pass `:oauth2-token` instead of `:password`.
 (folder/unread-count conn "INBOX")   ;; => 3
 ```
 
-### IDLE / push notifications (`fetch-imap.idle`)
+### IDLE / push notifications (`mailseq.idle`)
 
 ```clojure
-(require '[fetch-imap.idle :as idle])
+(require '[mailseq.idle :as idle])
 
 ;; Blocking — run in a future or thread
 (def idle-thread
@@ -161,9 +161,9 @@ clj -T:build deploy
 
 ## Contributing
 
-- Send a [bug report](mailto:~bzg/dev@lists.sr.ht) with `[BUG] fetch-imap: <SHORT EXPLICIT BUG DESCRIPTION>`{.verbatim}
-- Send a [patch](mailto:~bzg/dev@lists.sr.ht) with `[PATCH] fetch-imap: <COMMIT SUMMARY>`{.verbatim}
-- Send a [feature request](mailto:~bzg/dev@lists.sr.ht) with `[FR] fetch-imap: <FEATURE REQUEST>`{.verbatim}
+- Send a [bug report](mailto:~bzg/dev@lists.sr.ht) with `[BUG] mailseq: <SHORT EXPLICIT BUG DESCRIPTION>`{.verbatim}
+- Send a [patch](mailto:~bzg/dev@lists.sr.ht) with `[PATCH] mailseq: <COMMIT SUMMARY>`{.verbatim}
+- Send a [feature request](mailto:~bzg/dev@lists.sr.ht) with `[FR] mailseq: <FEATURE REQUEST>`{.verbatim}
 - Share any [other question or idea](mailto:~bzg/dev@lists.sr.ht)
 
 You can also [send me an email](mailto:bzg@bzg.fr) and support my work

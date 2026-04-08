@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns fetch-imap.parse
+(ns mailseq.parse
   "Parse Jakarta Mail Message objects into Clojure maps.
 
   This is the core of the library: robust handling of MIME multipart

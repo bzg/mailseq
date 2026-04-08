@@ -2,15 +2,15 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns fetch-imap.fetch
+(ns mailseq.fetch
   "Fetch IMAP messages by date, by absolute count, or relative to a UID.
 
-  All functions return parsed Clojure maps (via fetch-imap.parse/message->map)
+  All functions return parsed Clojure maps (via mailseq.parse/message->map)
   unless :raw? true is passed, in which case raw Jakarta Mail Message objects
   are returned."
   (:require [clojure.tools.logging :as log]
-            [fetch-imap.folder :as folder]
-            [fetch-imap.parse :as parse])
+            [mailseq.folder :as folder]
+            [mailseq.parse :as parse])
   (:import [jakarta.mail Folder Message UIDFolder UIDFolder$FetchProfileItem
             FetchProfile FetchProfile$Item]
            [jakarta.mail.search AndTerm SentDateTerm ComparisonTerm]

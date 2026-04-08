@@ -2,17 +2,17 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns fetch-imap.fetch-test
-  "Unit tests for fetch-imap.fetch internals (parse-date, build-date-term).
+(ns mailseq.fetch-test
+  "Unit tests for mailseq.fetch internals (parse-date, build-date-term).
 
   These test private functions via var references — no IMAP server required."
   (:require [clojure.test :refer [deftest testing is]]
-            [fetch-imap.fetch])
+            [mailseq.fetch])
   (:import [java.util Date]
            [jakarta.mail.search SentDateTerm AndTerm]))
 
-(def ^:private parse-date #'fetch-imap.fetch/parse-date)
-(def ^:private build-date-term #'fetch-imap.fetch/build-date-term)
+(def ^:private parse-date #'mailseq.fetch/parse-date)
+(def ^:private build-date-term #'mailseq.fetch/build-date-term)
 
 ;; ---------------------------------------------------------------------------
 ;; parse-date
