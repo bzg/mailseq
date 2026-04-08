@@ -15,13 +15,13 @@ Early development — API may change before 1.0.
 deps.edn:
 
 ```clojure
-org.clojars.bzg/mailseq {:mvn/version "0.1.0"}
+org.clojars.bzg/mailseq {:mvn/version "0.0.1"}
 ```
 
 Leiningen:
 
 ```clojure
-[org.clojars.bzg/mailseq "0.1.0"]
+[org.clojars.bzg/mailseq "0.0.1"]
 ```
 
 ## Quick start
