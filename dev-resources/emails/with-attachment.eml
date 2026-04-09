@@ -1,0 +1,18 @@
+From: Alice Test <alice@example.com>
+To: Bob Test <bob@example.com>
+Subject: Message with attachment
+Date: Sat, 05 Apr 2025 10:00:00 +0000
+Message-ID: <test-003@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mixedboundary"
+
+--mixedboundary
+Content-Type: text/plain; charset=UTF-8
+
+See the attached file.
+--mixedboundary
+Content-Type: text/plain; charset=UTF-8; name="note.txt"
+Content-Disposition: attachment; filename="note.txt"
+
+hello attached world
+--mixedboundary--

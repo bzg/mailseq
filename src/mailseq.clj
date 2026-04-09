@@ -51,24 +51,18 @@
 ;; IMAP backend
 ;; ---------------------------------------------------------------------------
 
-(defn- imap-assoc-id
-  "Derive the stable `:id` of an IMAP message from its UID. IMAP UIDs
-  are unique within a folder and stable across sessions, which is
-  exactly what the common message-map contract requires."
-  [m]
-  (cond-> m
-    (and (nil? (:id m)) (:uid m)) (assoc :id (str (:uid m)))))
-
 (defrecord ImapSource [conn folders]
   source/MailSource
   (-list-folders [_]
     (vec (keys folders)))
   (-messages [_ folder-name opts]
-    (mapv imap-assoc-id
-          (imap-fetch/messages conn (resolve-folder folders folder-name) opts)))
+    (imap-fetch/messages conn (resolve-folder folders folder-name) opts))
   (-by-id [_ folder-name id opts]
-    (mapv imap-assoc-id
-          (imap-fetch/by-uid conn (resolve-folder folders folder-name) id opts)))
+    ;; IMAP ids are UIDs (or UID strings). imap-fetch/by-uid accepts
+    ;; both a scalar and a collection and always returns a vector; we
+    ;; take the first element to honour the single-message contract.
+    (let [uid (if (string? id) (Long/parseLong id) id)]
+      (first (imap-fetch/by-uid conn (resolve-folder folders folder-name) uid opts))))
   (-close [_]
     (imap-core/disconnect conn))
   Closeable
@@ -150,8 +144,10 @@
   ([src folder-name opts] (source/-messages src folder-name opts)))
 
 (defn by-id
-  "Fetch a single message (or nil) from `folder-name` by its backend
-  identifier. For IMAP, `id` is a UID."
+  "Fetch a single message map (or nil) from `folder-name` by its
+  backend-specific stable id. For IMAP, `id` is a UID (long or its
+  string representation). For Maildir, `id` is the filename prefix
+  before the `:2,` flag suffix."
   ([src folder-name id]      (by-id src folder-name id {}))
   ([src folder-name id opts] (source/-by-id src folder-name id opts)))
 
