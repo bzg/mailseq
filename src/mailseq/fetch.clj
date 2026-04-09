@@ -3,17 +3,24 @@
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
 (ns mailseq.fetch
-  "Fetch IMAP messages by date, by absolute count, or relative to a UID.
+  "Fetch IMAP messages by date range and/or by absolute count.
 
-  All functions return parsed Clojure maps (via mailseq.parse/message->map)
-  unless :raw? true is passed, in which case raw Jakarta Mail Message objects
-  are returned."
+  mailseq is read-only and driven by just two selection criteria:
+  `:since`/`:before` (via `SentDateTerm`) and `:limit` (via UID-range
+  optimisation or tail-of-result). The IMAP backend does not use
+  `SEARCH FROM/TO/SUBJECT/…` because those verbs are implemented
+  inconsistently across servers.
+
+  All functions return parsed Clojure maps (via
+  `mailseq.parse/message->map`) unless `:raw? true` is passed, in
+  which case raw Jakarta Mail `Message` objects are returned."
   (:require [clojure.tools.logging :as log]
+            [mailseq.filter :as flt]
             [mailseq.folder :as folder]
             [mailseq.parse :as parse])
   (:import [jakarta.mail Folder Message UIDFolder UIDFolder$FetchProfileItem
             FetchProfile FetchProfile$Item]
-           [jakarta.mail.search AndTerm SentDateTerm ComparisonTerm]
+           [jakarta.mail.search AndTerm ComparisonTerm SentDateTerm]
            [java.util Date]
            [java.text SimpleDateFormat]))
 
@@ -52,7 +59,9 @@
                                (str "Expected a Date or date string, got: " (type d))))))
 
 (defn- build-date-term
-  "Build a SentDateTerm (or AndTerm) from :since/:before, or nil."
+  "Build a `SentDateTerm` (or `AndTerm`) from `:since`/`:before`, or
+  nil when neither is present. This is the only server-side term
+  mailseq uses — full-text SEARCH verbs are out of scope."
   [{:keys [since before]}]
   (let [terms (cond-> []
                 since  (conj (SentDateTerm. ComparisonTerm/GE (parse-date since)))
@@ -177,6 +186,10 @@
     (messages conn \"INBOX\" {:since \"2025-01-01\"})"
   ([conn folder-name] (messages conn folder-name {}))
   ([conn folder-name opts]
+   ;; :raw? is an IMAP-only escape hatch, whitelisted on top of the
+   ;; common contract. validate-opts rejects anything else, matching
+   ;; the strictness Maildir has always had.
+   (flt/validate-opts opts #{:raw?})
    (let [folder (folder/open-folder conn folder-name)]
      (try
        (let [date-term (build-date-term opts)

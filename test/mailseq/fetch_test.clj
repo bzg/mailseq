@@ -11,7 +11,7 @@
   (:import [java.util Date]
            [jakarta.mail.search SentDateTerm AndTerm]))
 
-(def ^:private parse-date #'mailseq.fetch/parse-date)
+(def ^:private parse-date       #'mailseq.fetch/parse-date)
 (def ^:private build-date-term #'mailseq.fetch/build-date-term)
 
 ;; ---------------------------------------------------------------------------
@@ -65,7 +65,8 @@
 (deftest build-date-term-empty
   (testing "no date keys returns nil"
     (is (nil? (build-date-term {})))
-    (is (nil? (build-date-term {:limit 10})))))
+    (is (nil? (build-date-term {:limit 10})))
+    (is (nil? (build-date-term {:headers? true :body? false})))))
 
 (deftest build-date-term-single
   (testing "single :since returns SentDateTerm"

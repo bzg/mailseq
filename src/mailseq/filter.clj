@@ -5,16 +5,16 @@
 (ns mailseq.filter
   "Pure, in-memory filtering of parsed message maps.
 
-  This namespace is the canonical implementation of the fetch-option
-  contract described in plan §14. It has no I/O and no backend
-  dependencies: it consumes message maps that already conform to the
-  shape described in plan §13 and returns the subset matching a set of
-  options.
+  mailseq is a strictly read-only library driven by two selection
+  criteria only: a date range (`:since` / `:before`) and a count
+  (`:limit`). Full-text matching on subject, addressees, or
+  message-id is out of scope — if you need that, filter the sequence
+  returned by `mailseq/messages` in your own code.
 
-  The IMAP backend translates the same options into server-side
-  SearchTerms for efficiency; Maildir and Mbox will consume this
-  namespace directly."
-  (:require [clojure.string :as str])
+  This namespace is the canonical implementation of that contract.
+  It has no I/O and no backend dependencies: it consumes message
+  maps and returns the subset whose `:date-sent` falls in the
+  requested window."
   (:import [java.util Date]
            [java.text SimpleDateFormat]))
 
@@ -24,31 +24,39 @@
 
 (def ^:private match-keys
   "Options that constrain which messages match (applied by `matches?`)."
-  #{:since :before :from :to :cc :subject :message-id})
+  #{:since :before})
 
 (def ^:private parse-keys
   "Options that control how messages are parsed (passed through to parse)."
-  #{:headers? :body? :attachments? :raw?})
+  #{:headers? :body? :attachments?})
 
 (def ^:private shape-keys
   "Options that reshape the result set (applied after `matches?`)."
   #{:limit})
 
 (def allowed-option-keys
-  "The full set of keys accepted by `mailseq/messages` across every backend."
+  "The full set of keys accepted by `mailseq/messages` across every
+  backend. Backend-specific extras (e.g. the IMAP-only `:raw?`) are
+  not part of this set and must be whitelisted at the call site via
+  the 2-arity of `validate-opts`."
   (into #{} (concat match-keys parse-keys shape-keys)))
 
 (defn validate-opts
   "Throw ex-info if `opts` contains any key outside the common contract.
-  Returns `opts` unchanged on success."
-  [opts]
-  (let [unknown (into #{} (remove allowed-option-keys) (keys opts))]
-    (when (seq unknown)
-      (throw (ex-info (str "Unsupported fetch option(s): " (pr-str unknown))
-                      {:type    ::unsupported-options
-                       :unknown unknown
-                       :allowed allowed-option-keys}))))
-  opts)
+  Returns `opts` unchanged on success.
+
+  The 2-arity accepts an `extra-allowed` set of backend-specific keys
+  that should also be tolerated (e.g. `#{:raw?}` on IMAP)."
+  ([opts] (validate-opts opts #{}))
+  ([opts extra-allowed]
+   (let [allowed (into allowed-option-keys extra-allowed)
+         unknown (into #{} (remove allowed) (keys opts))]
+     (when (seq unknown)
+       (throw (ex-info (str "Unsupported fetch option(s): " (pr-str unknown))
+                       {:type    ::unsupported-options
+                        :unknown unknown
+                        :allowed allowed}))))
+   opts))
 
 ;; ---------------------------------------------------------------------------
 ;; Date coercion (pure)
@@ -79,23 +87,6 @@
 ;; Per-filter predicates (pure, operate on a parsed message map)
 ;; ---------------------------------------------------------------------------
 
-(defn- ci-contains?
-  "Case-insensitive substring test. Nil-safe on both sides."
-  [haystack needle]
-  (and haystack needle
-       (str/includes? (str/lower-case haystack)
-                      (str/lower-case needle))))
-
-(defn- address-matches?
-  "True if substring `needle` appears in any :name or :address of an
-  address vector (e.g. the value of :from, :to, :cc)."
-  [addresses needle]
-  (boolean
-   (some (fn [{:keys [name address]}]
-           (or (ci-contains? name needle)
-               (ci-contains? address needle)))
-         addresses)))
-
 (defn- since? [{:keys [date-sent]} since]
   (and date-sent (not (.before ^Date date-sent (->date since)))))
 
@@ -103,22 +94,17 @@
   (and date-sent (.before ^Date date-sent (->date before))))
 
 (defn matches?
-  "True if message map `m` satisfies every filter option in `opts`.
+  "True if message map `m` satisfies the date window in `opts`.
 
-  A message is excluded when a filter is present but cannot be
-  evaluated (e.g. `:since` on a message with no `:date-sent`). Filters
-  absent from `opts` are ignored.
+  A message is excluded when `:since` or `:before` is present but
+  `:date-sent` is nil — there is no date to evaluate, so the safest
+  answer is to drop the message rather than silently keep it.
 
   Options not in the match set (`:limit`, `:headers?`, …) are
   silently passed through — they do not influence the decision."
-  [m {:keys [since before from to cc subject message-id] :as _opts}]
-  (and (or (nil? since)      (since? m since))
-       (or (nil? before)     (before? m before))
-       (or (nil? from)       (address-matches? (:from m) from))
-       (or (nil? to)         (address-matches? (:to m) to))
-       (or (nil? cc)         (address-matches? (:cc m) cc))
-       (or (nil? subject)    (ci-contains? (:subject m) subject))
-       (or (nil? message-id) (= (:message-id m) message-id))))
+  [m {:keys [since before] :as _opts}]
+  (and (or (nil? since)  (since? m since))
+       (or (nil? before) (before? m before))))
 
 ;; ---------------------------------------------------------------------------
 ;; Convenience: apply the full contract to a seq of messages

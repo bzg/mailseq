@@ -178,6 +178,78 @@
       (testing "unknown id returns nil"
         (is (nil? (mailseq/by-id src "INBOX" "999999999")))))))
 
+;; ---------------------------------------------------------------------------
+;; Filter contract is honoured end-to-end on every backend
+;; ---------------------------------------------------------------------------
+
+(defn- ids-by-filter [src opts]
+  (into #{} (map :message-id) (mailseq/messages src "INBOX" opts)))
+
+(deftest date-filters-applied-identically-on-both-backends
+  (let [maildir-path (make-maildir-fixture)]
+    (mailseq/with-source [imap-src {:type :imap
+                                    :host "localhost"
+                                    :port *imap-port*
+                                    :ssl false
+                                    :user imap-user
+                                    :password imap-pass
+                                    :folders {"INBOX" "INBOX"}}]
+      (mailseq/with-source [md-src {:type :maildir
+                                    :folders {"INBOX" maildir-path}}]
+        (doseq [opts [{}
+                      {:since "2025-02-01"}
+                      {:before "2025-06-01"}
+                      {:since "2025-02-01" :before "2025-06-01"}
+                      {:limit 1}]]
+          (testing (str "opts " (pr-str opts))
+            (is (= (ids-by-filter imap-src opts)
+                   (ids-by-filter md-src   opts)))))))))
+
+(deftest full-text-keys-rejected-on-both-backends
+  (let [maildir-path (make-maildir-fixture)]
+    (mailseq/with-source [imap-src {:type :imap
+                                    :host "localhost"
+                                    :port *imap-port*
+                                    :ssl false
+                                    :user imap-user
+                                    :password imap-pass
+                                    :folders {"INBOX" "INBOX"}}]
+      (mailseq/with-source [md-src {:type :maildir
+                                    :folders {"INBOX" maildir-path}}]
+        (doseq [src [imap-src md-src]
+                k   [:from :to :cc :subject :message-id]]
+          (testing (str "key " k " rejected")
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported"
+                                  (mailseq/messages src "INBOX" {k "x"})))))))))
+
+(deftest imap-rejects-unknown-options
+  (mailseq/with-source [src {:type :imap
+                             :host "localhost"
+                             :port *imap-port*
+                             :ssl false
+                             :user imap-user
+                             :password imap-pass
+                             :folders {"INBOX" "INBOX"}}]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported"
+                          (mailseq/messages src "INBOX" {:bogus 1})))))
+
+(deftest raw-is-imap-only
+  (testing "raw? is accepted on IMAP"
+    (mailseq/with-source [src {:type :imap
+                               :host "localhost"
+                               :port *imap-port*
+                               :ssl false
+                               :user imap-user
+                               :password imap-pass
+                               :folders {"INBOX" "INBOX"}}]
+      (let [raw (mailseq/messages src "INBOX" {:raw? true})]
+        (is (every? #(instance? jakarta.mail.Message %) raw)))))
+  (testing "raw? is rejected on Maildir"
+    (let [maildir-path (make-maildir-fixture)]
+      (mailseq/with-source [src {:type :maildir :folders {"INBOX" maildir-path}}]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported"
+                              (mailseq/messages src "INBOX" {:raw? true})))))))
+
 (deftest by-id-returns-single-message-maildir
   (let [maildir-path (make-maildir-fixture)]
     (mailseq/with-source [src {:type :maildir :folders {"INBOX" maildir-path}}]

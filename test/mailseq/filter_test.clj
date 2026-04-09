@@ -52,10 +52,23 @@
 (deftest validate-opts-accepts-contract
   (testing "all contract keys are accepted"
     (is (map? (f/validate-opts {:since "2025-01-01" :before "2026-01-01"
-                                :from "a" :to "b" :cc "c"
-                                :subject "s" :message-id "m"
                                 :limit 10 :headers? true :body? false
-                                :attachments? false :raw? false})))))
+                                :attachments? false})))))
+
+(deftest validate-opts-rejects-dropped-full-text-keys
+  (testing ":from/:to/:cc/:subject/:message-id are out of scope"
+    (doseq [k [:from :to :cc :subject :message-id]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported"
+                            (f/validate-opts {k "x"}))))))
+
+(deftest validate-opts-rejects-raw-by-default
+  (testing ":raw? is IMAP-only, rejected by the common contract"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported"
+                          (f/validate-opts {:raw? true})))))
+
+(deftest validate-opts-accepts-extras
+  (testing "extra-allowed set whitelists backend-specific keys"
+    (is (map? (f/validate-opts {:raw? true} #{:raw?})))))
 
 (deftest validate-opts-rejects-unknown
   (testing "unknown keys raise ex-info"
@@ -93,40 +106,13 @@
     (is (not (in-range msg-b)))
     (is (not (in-range msg-c)))))
 
-(deftest matches-from-substring-ci
-  (testing "substring against name"
-    (is (f/matches? msg-a {:from "dupont"})))
-  (testing "substring against address"
-    (is (f/matches? msg-b {:from "CORP.IO"})))
-  (testing "no match"
-    (is (not (f/matches? msg-a {:from "zzz"})))))
-
-(deftest matches-to-and-cc
-  (is (f/matches? msg-b {:to "alice"}))
-  (is (f/matches? msg-b {:cc "dave"}))
-  (is (not (f/matches? msg-a {:cc "dave"}))))
-
-(deftest matches-subject-ci
-  (is (f/matches? msg-a {:subject "CLOJURE"}))
-  (is (not (f/matches? msg-b {:subject "clojure"})))
-  (testing "nil subject never matches a :subject filter"
-    (is (not (f/matches? msg-c {:subject "anything"})))))
-
-(deftest matches-message-id-exact
-  (is (f/matches? msg-a {:message-id "<a@example.com>"}))
-  (is (not (f/matches? msg-a {:message-id "a@example.com"}))))
-
-(deftest matches-conjunction
-  (testing "all filters must pass"
-    (is (f/matches? msg-a {:from "alice" :subject "clojure"}))
-    (is (not (f/matches? msg-a {:from "alice" :subject "meeting"})))))
-
 ;; ---------------------------------------------------------------------------
 ;; apply-opts
 ;; ---------------------------------------------------------------------------
 
-(deftest apply-opts-filters
-  (is (= [msg-a] (f/apply-opts msgs {:from "alice"}))))
+(deftest apply-opts-filters-by-date
+  (is (= [msg-a] (f/apply-opts msgs {:before "2025-06-01"})))
+  (is (= [msg-b] (f/apply-opts msgs {:since "2025-06-01"}))))
 
 (deftest apply-opts-limit-keeps-tail
   (testing ":limit keeps the last N after filtering"

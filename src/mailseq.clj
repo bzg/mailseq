@@ -135,9 +135,19 @@
 (defn messages
   "Fetch messages from `folder-name` in `src`.
 
-  `opts` is the common fetch contract (see plan §14):
-    :limit, :since, :before, :from, :to, :cc, :subject, :message-id,
-    :headers?, :body?, :attachments?
+  Selection options:
+    :since        - messages sent on/after this date (Date or string)
+    :before       - messages sent strictly before this date
+    :limit        - keep the last N (most recent) matching messages
+
+  Parsing options (passed through to `mailseq.parse`):
+    :headers?     - include the full header map (default: true)
+    :body?        - parse body content (default: true)
+    :attachments? - include attachment byte data (default: true)
+
+  mailseq is read-only and intentionally exposes no substring search
+  on subject/addressees/message-id: if you need that, filter the
+  returned sequence yourself.
 
   Returns a vector of parsed message maps."
   ([src folder-name]      (messages src folder-name {}))

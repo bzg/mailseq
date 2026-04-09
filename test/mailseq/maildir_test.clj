@@ -61,11 +61,6 @@
   (is (thrown? clojure.lang.ExceptionInfo
                (maildir/messages fixture-path {:bogus true}))))
 
-(deftest filters-from
-  (let [msgs (maildir/messages fixture-path {:from "alice"})]
-    (is (= 1 (count msgs)))
-    (is (= "<test-001@example.com>" (:message-id (first msgs))))))
-
 (deftest filters-date-range
   (testing "only the 2025-01-15 message matches"
     (let [msgs (maildir/messages fixture-path
