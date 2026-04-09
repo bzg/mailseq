@@ -51,14 +51,24 @@
 ;; IMAP backend
 ;; ---------------------------------------------------------------------------
 
+(defn- imap-assoc-id
+  "Derive the stable `:id` of an IMAP message from its UID. IMAP UIDs
+  are unique within a folder and stable across sessions, which is
+  exactly what the common message-map contract requires."
+  [m]
+  (cond-> m
+    (and (nil? (:id m)) (:uid m)) (assoc :id (str (:uid m)))))
+
 (defrecord ImapSource [conn folders]
   source/MailSource
   (-list-folders [_]
     (vec (keys folders)))
   (-messages [_ folder-name opts]
-    (imap-fetch/messages conn (resolve-folder folders folder-name) opts))
+    (mapv imap-assoc-id
+          (imap-fetch/messages conn (resolve-folder folders folder-name) opts)))
   (-by-id [_ folder-name id opts]
-    (imap-fetch/by-uid conn (resolve-folder folders folder-name) id opts))
+    (mapv imap-assoc-id
+          (imap-fetch/by-uid conn (resolve-folder folders folder-name) id opts)))
   (-close [_]
     (imap-core/disconnect conn))
   Closeable
