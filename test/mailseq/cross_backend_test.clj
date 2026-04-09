@@ -41,23 +41,10 @@
 (def ^:private vary-keys
   #{:uid :id :date-received :headers :size :message-number :content-type})
 
-(defn- trim-body
-  "Normalize trailing whitespace in body parts. The IMAP fetch path
-  strips the trailing newline of each MIME part while the Maildir
-  path preserves the raw bytes. Tracked as a known divergence to fix
-  in the parse layer; neutralized here so the contract test can lock
-  the shape without being held hostage to that detail."
-  [body]
-  (when body
-    (-> body
-        (update :text #(some-> % (.replaceAll "\\s+$" "")))
-        (update :html #(some-> % (.replaceAll "\\s+$" ""))))))
-
 (defn- normalize [m]
   (-> (apply dissoc m vary-keys)
       ;; :recent is an IMAP-only flag with no Maildir equivalent.
-      (update :flags (fnil disj #{}) :recent)
-      (update :body trim-body)))
+      (update :flags (fnil disj #{}) :recent)))
 
 ;; ---------------------------------------------------------------------------
 ;; GreenMail harness
@@ -137,4 +124,4 @@
             (is (= (:cc m-imap)   (:cc m-md)))
             (is (= (:subject m-imap) (:subject m-md)))
             (is (= (:date-sent m-imap) (:date-sent m-md)))
-            (is (= (:body (normalize m-imap)) (:body (normalize m-md))))))))))
+            (is (= (:body m-imap) (:body m-md)))))))))

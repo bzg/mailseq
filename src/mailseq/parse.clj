@@ -101,15 +101,31 @@
                (not (text-part? part)))))
     (catch Exception _ false)))
 
+(defn- strip-trailing-newline
+  "Remove at most one trailing CRLF or LF from `s`.
+
+  Per RFC 2046 §5.1.1, the CRLF that precedes a multipart boundary is
+  part of the boundary delimiter, not part of the preceding body
+  part. Jakarta Mail's IMAP fetch path already strips it, while
+  reading a Maildir file via ByteArrayInputStream preserves it.
+  Normalizing here gives both backends identical body strings."
+  ^String [^String s]
+  (cond
+    (nil? s) nil
+    (.endsWith s "\r\n") (.substring s 0 (- (.length s) 2))
+    (.endsWith s "\n")   (.substring s 0 (dec (.length s)))
+    :else s))
+
 (defn- parse-text-content
   "Safely extract text content from a Part."
   [^Part part]
   (try
     (let [content (.getContent part)]
-      (cond
-        (string? content)              content
-        (instance? InputStream content) (String. (input-stream->bytes content) "UTF-8")
-        :else                          (str content)))
+      (strip-trailing-newline
+       (cond
+         (string? content)              content
+         (instance? InputStream content) (String. (input-stream->bytes content) "UTF-8")
+         :else                          (str content))))
     (catch Exception _ nil)))
 
 (defn- parse-attachment
