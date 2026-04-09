@@ -1,0 +1,31 @@
+From: Alice Test <alice@example.com>
+To: Bob Test <bob@example.com>
+Cc: Carol Test <carol@example.com>
+Subject: =?UTF-8?B?VGVzdCBtZXNzYWdlIHdpdGggw6ljZW50cw==?=
+Date: Mon, 10 Feb 2025 14:30:00 +0100
+Message-ID: <test-001@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary42"
+
+--boundary42
+Content-Type: text/plain; charset=UTF-8
+
+Hello Bob,
+
+This is a plain text test message with accented characters: éàü.
+
+Best,
+Alice
+
+--boundary42
+Content-Type: text/html; charset=UTF-8
+
+<html>
+<body>
+<p>Hello Bob,</p>
+<p>This is an <b>HTML</b> test message with accented characters: &eacute;&agrave;&uuml;.</p>
+<p>Best,<br>Alice</p>
+</body>
+</html>
+
+--boundary42--

@@ -28,7 +28,8 @@
   (:refer-clojure :exclude [list])
   (:require [mailseq.source :as source]
             [mailseq.core :as imap-core]
-            [mailseq.fetch :as imap-fetch])
+            [mailseq.fetch :as imap-fetch]
+            [mailseq.maildir :as maildir])
   (:import [java.io Closeable]))
 
 ;; ---------------------------------------------------------------------------
@@ -69,6 +70,26 @@
     (->ImapSource conn (or folders {}))))
 
 ;; ---------------------------------------------------------------------------
+;; Maildir backend
+;; ---------------------------------------------------------------------------
+
+(defrecord MaildirSource [folders]
+  source/MailSource
+  (-list-folders [_]
+    (vec (keys folders)))
+  (-messages [_ folder-name opts]
+    (maildir/messages (resolve-folder folders folder-name) opts))
+  (-by-id [_ folder-name id opts]
+    (maildir/by-id (resolve-folder folders folder-name) id opts))
+  (-close [_] nil)
+  Closeable
+  (close [this] (source/-close this)))
+
+(defn- open-maildir
+  [{:keys [folders]}]
+  (->MaildirSource (or folders {})))
+
+;; ---------------------------------------------------------------------------
 ;; Dispatch
 ;; ---------------------------------------------------------------------------
 
@@ -76,7 +97,8 @@
   "Backend-specific open. Dispatches on `:type`."
   :type)
 
-(defmethod open* :imap [cfg] (open-imap cfg))
+(defmethod open* :imap    [cfg] (open-imap cfg))
+(defmethod open* :maildir [cfg] (open-maildir cfg))
 
 (defmethod open* :default [{:keys [type]}]
   (throw (ex-info (str "Unsupported source type: " (pr-str type))

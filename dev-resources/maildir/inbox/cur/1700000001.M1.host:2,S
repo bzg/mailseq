@@ -1,0 +1,10 @@
+From: sender@example.com
+To: receiver@example.com
+Subject: Plain text only
+Date: Wed, 15 Jan 2025 09:00:00 +0000
+Message-ID: <test-002@example.com>
+Content-Type: text/plain; charset=US-ASCII
+
+This is a simple plain text email with no multipart content.
+Line two.
+Line three.
