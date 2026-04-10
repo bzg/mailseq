@@ -14,11 +14,15 @@
   parser actually encounters in the wild."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [clojure.java.io :as io]
-            [mailseq :as mailseq])
+            [mailseq :as mailseq]
+            [mailseq.imap.connect :as imap-connect]
+            [mailseq.imap.fetch :as imap-fetch]
+            [mailseq.imap.folder :as imap-folder]
+            [mailseq.imap.idle :as imap-idle])
   (:import [com.icegreen.greenmail.util GreenMail ServerSetup]
            [com.icegreen.greenmail.user GreenMailUser]
            [jakarta.mail.internet MimeMessage]
-           [jakarta.mail Session]
+           [jakarta.mail Session UIDFolder]
            [java.io ByteArrayInputStream]
            [java.nio.file Files]
            [java.util Properties]))
@@ -261,3 +265,129 @@
         (is (= (:message-id one) (:message-id fetched)))
         (testing "unknown id returns nil"
           (is (nil? (mailseq/by-id src "INBOX" "nope"))))))))
+
+;; ---------------------------------------------------------------------------
+;; list-ids / by-ids incremental workflow
+;; ---------------------------------------------------------------------------
+
+(deftest list-ids-on-both-backends
+  (let [maildir-path (make-maildir-fixture)]
+    (mailseq/with-source [imap-src {:type :imap
+                                    :host "localhost"
+                                    :port *imap-port*
+                                    :ssl false
+                                    :user imap-user
+                                    :password imap-pass
+                                    :folders {"INBOX" "INBOX"}}]
+      (mailseq/with-source [md-src {:type :maildir
+                                    :folders {"INBOX" maildir-path}}]
+        (let [imap-ids (mailseq/list-ids imap-src "INBOX")
+              md-ids   (mailseq/list-ids md-src   "INBOX")]
+          (testing "returns the right count"
+            (is (= (count fixtures) (count imap-ids)))
+            (is (= (count fixtures) (count md-ids))))
+          (testing "all ids are non-blank strings"
+            (is (every? #(and (string? %) (seq %)) imap-ids))
+            (is (every? #(and (string? %) (seq %)) md-ids))))))))
+
+(deftest by-ids-batch-on-both-backends
+  (let [maildir-path (make-maildir-fixture)]
+    (mailseq/with-source [imap-src {:type :imap
+                                    :host "localhost"
+                                    :port *imap-port*
+                                    :ssl false
+                                    :user imap-user
+                                    :password imap-pass
+                                    :folders {"INBOX" "INBOX"}}]
+      (mailseq/with-source [md-src {:type :maildir
+                                    :folders {"INBOX" maildir-path}}]
+        (doseq [[label src] [["IMAP" imap-src] ["Maildir" md-src]]]
+          (testing label
+            (let [all-ids (mailseq/list-ids src "INBOX")
+                  msgs    (mailseq/by-ids src "INBOX" all-ids)]
+              (is (= (count fixtures) (count msgs)))
+              (is (= (set (map :message-id msgs))
+                     (set (map first fixtures)))))
+            (testing "subset fetch"
+              (let [one-id (first (mailseq/list-ids src "INBOX"))
+                    msgs   (mailseq/by-ids src "INBOX" [one-id])]
+                (is (= 1 (count msgs)))
+                (is (= one-id (:id (first msgs))))))))))))
+
+;; ---------------------------------------------------------------------------
+;; IMAP-specific: by-uid-range, folder operations
+;; ---------------------------------------------------------------------------
+
+(defn- make-imap-conn []
+  (imap-connect/connect {:host "localhost"
+                         :port *imap-port*
+                         :ssl false
+                         :user imap-user
+                         :password imap-pass}))
+
+(deftest by-uid-range-fetches-subset
+  (let [conn (make-imap-conn)]
+    (try
+      (let [all   (imap-fetch/messages conn "INBOX")
+            uids  (mapv :uid all)
+            start (apply min uids)
+            end   (apply max uids)
+            range (imap-fetch/by-uid-range conn "INBOX" start end)]
+        (is (= (count all) (count range)))
+        (testing "same message-ids"
+          (is (= (set (map :message-id all))
+                 (set (map :message-id range))))))
+      (finally
+        (imap-connect/disconnect conn)))))
+
+(deftest by-uid-range-with-lastuid
+  (let [conn (make-imap-conn)]
+    (try
+      (let [all    (imap-fetch/messages conn "INBOX")
+            uids   (mapv :uid all)
+            mid    (nth (sort uids) 1)
+            subset (imap-fetch/by-uid-range conn "INBOX" mid UIDFolder/LASTUID)]
+        (is (<= (count subset) (count all)))
+        (is (every? #(>= (:uid %) mid) subset)))
+      (finally
+        (imap-connect/disconnect conn)))))
+
+(deftest folder-list-and-counts
+  (let [conn (make-imap-conn)]
+    (try
+      (let [folders (imap-folder/list-folders conn)]
+        (testing "list-folders returns at least INBOX"
+          (is (seq folders))
+          (is (some #(= "INBOX" (:name %)) folders)))
+        (testing "folder maps have expected keys"
+          (let [inbox (first (filter #(= "INBOX" (:name %)) folders))]
+            (is (contains? inbox :full-name))
+            (is (contains? inbox :type))
+            (is (contains? inbox :message-count))
+            (is (contains? inbox :unread-count)))))
+      (testing "message-count"
+        (is (= (count fixtures)
+               (imap-folder/message-count conn "INBOX"))))
+      (testing "unread-count"
+        (is (number? (imap-folder/unread-count conn "INBOX"))))
+      (finally
+        (imap-connect/disconnect conn)))))
+
+(deftest idle-async-starts-and-stops
+  (let [conn    (make-imap-conn)
+        msgs    (atom [])
+        thread  (imap-idle/idle-async conn "INBOX"
+                                     (fn [m] (swap! msgs conj m))
+                                     {:heartbeat-ms 500})]
+    (try
+      (testing "thread is alive"
+        (is (.isAlive thread)))
+      (Thread/sleep 200)
+      (testing "interrupting stops the thread"
+        (.interrupt thread)
+        (.join thread 8000)
+        (is (not (.isAlive thread))))
+      (finally
+        (when (.isAlive thread) (.interrupt thread))
+        (imap-connect/disconnect conn)))))
+

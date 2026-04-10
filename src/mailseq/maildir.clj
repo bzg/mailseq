@@ -89,10 +89,11 @@
 ;; File → message map
 ;; ---------------------------------------------------------------------------
 
-(def ^:private ^Session shared-session
+(def ^:private shared-session
   ;; A Session is safe to share across threads for parsing. We hold a
   ;; single instance to avoid re-building Properties on every file.
-  (Session/getInstance (Properties.)))
+  ;; Wrapped in delay so the Session is only created when actually needed.
+  (delay (Session/getInstance (Properties.))))
 
 (defn- read-bytes
   "Read the full contents of `f` as a byte array. Bytes upstream keeps
@@ -100,28 +101,47 @@
   ^bytes [^File f]
   (Files/readAllBytes (.toPath f)))
 
+(defn- file->envelope
+  "Read one Maildir file, returning a lightweight map with just enough
+  info for date filtering: `:file`, `:bytes`, `:date-sent`, `:fname`.
+  Returns nil if the file cannot be read."
+  [^File f]
+  (try
+    (let [bytes (read-bytes f)
+          msg   (MimeMessage. ^Session @shared-session (ByteArrayInputStream. bytes))]
+      {:file f :bytes bytes :date-sent (.getSentDate msg) :fname (.getName f)})
+    (catch Exception e
+      (log/warn "Skipping Maildir file"
+                (.getAbsolutePath f)
+                "- failed to read:" (.getMessage e))
+      nil)))
+
+(defn- envelope->map
+  "Full-parse a message from retained bytes + file metadata."
+  [{:keys [^File file ^bytes bytes fname]} parse-opts]
+  (try
+    (let [msg    (MimeMessage. ^Session @shared-session (ByteArrayInputStream. bytes))
+          parsed (parse/message->map msg parse-opts)
+          flags  (parse-flags fname)]
+      (-> parsed
+          (assoc :id            (stable-id fname)
+                 :flags         flags
+                 :date-received (Date. (.lastModified file))
+                 :uid           nil)
+          (dissoc :message-number)))
+    (catch Exception e
+      (log/warn "Skipping Maildir file"
+                (.getAbsolutePath file)
+                "- failed to parse:" (.getMessage e))
+      nil)))
+
 (defn- file->map
   "Read one Maildir file and parse it into a message map, overriding
   the keys that are Maildir-specific (id, flags, date-received, uid).
   Returns nil and logs a warning if the file cannot be read or parsed."
   [^File f parse-opts]
-  (try
-    (let [bytes   (read-bytes f)
-          msg     (MimeMessage. shared-session (ByteArrayInputStream. bytes))
-          parsed  (parse/message->map msg parse-opts)
-          fname   (.getName f)
-          flags   (parse-flags fname)]
-      (-> parsed
-          (assoc :id            (stable-id fname)
-                 :flags         flags
-                 :date-received (Date. (.lastModified f))
-                 :uid           nil)
-          (dissoc :message-number)))
-    (catch Exception e
-      (log/warn "Skipping Maildir file"
-                (.getAbsolutePath f)
-                "- failed to parse:" (.getMessage e))
-      nil)))
+  (when-let [env (file->envelope f)]
+    (envelope->map env parse-opts)))
 
 ;; ---------------------------------------------------------------------------
 ;; Public operations (called by the MaildirSource record in `mailseq`)
@@ -132,26 +152,49 @@
   at the head. This places the freshest dated messages at the tail,
   which is the stable slice `apply-opts` picks when `:limit` is set."
   [messages]
-  (sort-by (fn [m] (some-> ^Date (:date-sent m) .getTime))
-           (fn [a b]
-             (cond
-               (and (nil? a) (nil? b)) 0
-               (nil? a) -1
-               (nil? b) 1
-               :else (compare a b)))
+  (sort-by (fn [m] (or (some-> ^Date (:date-sent m) .getTime)
+                       Long/MIN_VALUE))
            messages))
+
 
 (defn messages
   "Read every message under `path` (a Maildir directory), parse them
   and return the filtered vector according to `opts`. `opts` is
-  validated against the common contract."
+  validated against the common contract.
+
+  When `:since` or `:before` is present, a two-pass strategy avoids
+  full MIME parsing on messages outside the date window: pass 1
+  extracts just the `Date:` header (cheap), filters + sorts + limits,
+  then pass 2 does the full `message->map` only on survivors."
   [^String path opts]
   (flt/validate-opts opts)
+  (let [dir   (io/file path)
+        _     (validate-maildir! dir)
+        files (maildir-children dir)]
+    (if (or (:since opts) (:before opts))
+      ;; Two-pass: envelope-only filter, then full parse on survivors
+      (let [envelopes (into [] (keep file->envelope) files)
+            filtered  (filterv #(flt/matches? % opts) envelopes)
+            sorted    (sort-for-limit filtered)
+            limited   (if-let [limit (:limit opts)]
+                        (subvec sorted (max 0 (- (count sorted) limit)))
+                        sorted)
+            p-opts    (flt/parse-opts opts)]
+        (into [] (keep #(envelope->map % p-opts)) limited))
+      ;; No date filter: single pass
+      (let [parsed (into [] (keep #(file->map % (flt/parse-opts opts))) files)
+            sorted (sort-for-limit parsed)]
+        (flt/apply-opts sorted opts)))))
+
+(defn list-ids
+  "Return a vector of stable id strings for every message in the
+  Maildir at `path`. Only reads filenames — no file content is
+  touched. Cost: one `listFiles` per subdirectory."
+  [^String path]
   (let [dir (io/file path)]
     (validate-maildir! dir)
-    (let [parsed (into [] (keep #(file->map % opts)) (maildir-children dir))
-          sorted (vec (sort-for-limit parsed))]
-      (flt/apply-opts sorted opts))))
+    (mapv (fn [^File f] (stable-id (.getName f)))
+          (maildir-children dir))))
 
 (defn by-id
   "Return the single message whose stable id matches `id`, or nil.
@@ -160,10 +203,29 @@
   on the stable prefix. Scans `cur/` then `new/` — this is O(n) in
   v1; an index can come later if it proves necessary."
   [^String path ^String id opts]
-  (flt/validate-opts (dissoc opts :limit))
+  (flt/validate-opts opts)
   (let [dir (io/file path)]
     (validate-maildir! dir)
     (some (fn [^File f]
             (when (= id (stable-id (.getName f)))
-              (file->map f opts)))
+              (file->map f (flt/parse-opts opts))))
+          (maildir-children dir))))
+
+(defn by-ids
+  "Return a vector of message maps for every message whose stable id
+  is in `ids` (a set of strings). A single scan of `cur/` + `new/`
+  reads only the matching files.
+
+  Typical use: call `list-ids` to get all ids, diff against a set of
+  already-seen ids, then call `by-ids` with the remainder."
+  [^String path ids opts]
+  (flt/validate-opts opts)
+  (let [dir    (io/file path)
+        _      (validate-maildir! dir)
+        id-set (if (set? ids) ids (set ids))
+        p-opts (flt/parse-opts opts)]
+    (into []
+          (keep (fn [^File f]
+                  (when (contains? id-set (stable-id (.getName f)))
+                    (file->map f p-opts))))
           (maildir-children dir))))

@@ -2,12 +2,12 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns mailseq.core
+(ns mailseq.imap.connect
   "IMAP connection management.
 
   Connect to an IMAP server and obtain a store that can be passed
-  to functions in mailseq.folder and mailseq.fetch."
-  (:import [jakarta.mail Session Store Folder]
+  to functions in `mailseq.imap.folder` and `mailseq.imap.fetch`."
+  (:import [jakarta.mail Session Store]
            [java.util Properties]))
 
 (defn- make-properties
@@ -69,17 +69,3 @@
   (when (and store (.isConnected store))
     (.close store)))
 
-(defmacro with-connection
-  "Execute body with a connection, ensuring disconnect on exit.
-
-  Example:
-    (with-connection [conn {:host \"imap.example.com\"
-                            :user \"me@example.com\"
-                            :password \"secret\"}]
-      (fetch/messages conn \"INBOX\" {:limit 10}))"
-  [[sym opts] & body]
-  `(let [~sym (connect ~opts)]
-     (try
-       ~@body
-       (finally
-         (disconnect ~sym)))))

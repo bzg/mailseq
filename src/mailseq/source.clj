@@ -4,7 +4,7 @@
 
 (ns mailseq.source
   "MailSource protocol: the unified, read-only interface shared by every
-  backend (IMAP, Maildir, Mbox).
+  backend (IMAP, Maildir).
 
   Consumers should use the functions in the top-level `mailseq` namespace
   rather than calling protocol methods directly. The protocol exists to
@@ -23,11 +23,21 @@
 
   (-messages [this folder-name opts]
     "Return a vector of message maps from the given logical folder.
-    `opts` is restricted to the contract described in plan §14.")
+    `opts` is restricted to `mailseq.filter/allowed-option-keys`.")
+
+  (-list-ids [this folder-name]
+    "Return a vector of stable id strings for every message in
+    `folder-name`, without reading or parsing message content.
+    For IMAP, ids are UID strings; for Maildir, filename prefixes.")
 
   (-by-id [this folder-name id opts]
     "Return a single message map (or nil) from `folder-name` identified
     by the backend's stable id. For IMAP, `id` is a UID (long).")
+
+  (-by-ids [this folder-name ids opts]
+    "Return a vector of message maps for the given set of ids.
+    More efficient than repeated `-by-id` calls: a single filesystem
+    or server round-trip.")
 
   (-close [this]
     "Release any resources held by this source. Idempotent."))

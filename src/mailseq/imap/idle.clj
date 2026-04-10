@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns mailseq.idle
+(ns mailseq.imap.idle
   "IMAP IDLE support for receiving push notifications when new messages arrive.
 
   IDLE keeps a connection open and the server notifies the client when
@@ -10,9 +10,10 @@
 
   A heartbeat thread periodically breaks out of IDLE to force a NOOP
   roundtrip, preventing NATs/firewalls/servers from killing the connection."
-  (:require [mailseq.folder :as folder]
+  (:require [clojure.tools.logging :as log]
+            [mailseq.imap.folder :as folder]
             [mailseq.parse :as parse])
-  (:import [jakarta.mail Folder Store MessagingException]
+  (:import [jakarta.mail Store]
            [jakarta.mail.event MessageCountListener MessageCountEvent]
            [org.eclipse.angus.mail.imap IMAPFolder]))
 
@@ -26,7 +27,7 @@
           (try
             (on-added (parse/message->map msg parse-opts))
             (catch Exception e
-              (println "Error processing new message:" (.getMessage e)))))))
+              (log/error e "Error processing new message"))))))
     (messagesRemoved [_ _event]
       ;; We don't act on removals in a read-only library
       nil)))
@@ -86,7 +87,7 @@
   ([conn folder-name on-message] (idle conn folder-name on-message {}))
   ([conn folder-name on-message {:keys [parse-opts on-error heartbeat-ms]
                                  :or   {parse-opts   {}
-                                        on-error     #(println "IDLE error:" (.getMessage %))
+                                        on-error     #(log/error % "IDLE error")
                                         heartbeat-ms 1200000}}]
    (let [folder       (folder/open-folder conn folder-name)
          imap-folder  ^IMAPFolder folder
@@ -100,23 +101,26 @@
                     (.isConnected store)
                     (not (Thread/interrupted)))
            (try
-             ;; IDLE command — blocks until:
-             ;; - server sends a notification (new mail, expunge, etc.)
-             ;; - heartbeat thread sends a NOOP (breaking IDLE)
-             ;; - connection dies
              (.idle imap-folder)
              (catch jakarta.mail.FolderClosedException _
-               nil)  ;; Exit the loop
+               nil)
+             (catch InterruptedException _
+               (.interrupt (Thread/currentThread)))
              (catch jakarta.mail.MessagingException e
                (if (re-find #"(?i)IDLE not supported" (or (.getMessage e) ""))
-                 ;; Server doesn't support IDLE — fall back to sleep + NOOP
-                 (do (Thread/sleep heartbeat-ms)
-                     (.getMessageCount folder))
-                 (do (on-error e)
-                     (Thread/sleep 5000))))
+                 (try (Thread/sleep heartbeat-ms)
+                      (.getMessageCount folder)
+                      (catch InterruptedException _
+                        (.interrupt (Thread/currentThread))))
+                 (try (on-error e)
+                      (Thread/sleep 5000)
+                      (catch InterruptedException _
+                        (.interrupt (Thread/currentThread))))))
              (catch Exception e
-               (on-error e)
-               (Thread/sleep 5000)))
+               (try (on-error e)
+                    (Thread/sleep 5000)
+                    (catch InterruptedException _
+                      (.interrupt (Thread/currentThread))))))
            (recur)))
        (finally
          (.interrupt heartbeat)

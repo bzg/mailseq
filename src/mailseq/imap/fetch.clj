@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns mailseq.fetch
+(ns mailseq.imap.fetch
   "Fetch IMAP messages by date range and/or by absolute count.
 
   mailseq is read-only and driven by just two selection criteria:
@@ -16,13 +16,11 @@
   which case raw Jakarta Mail `Message` objects are returned."
   (:require [clojure.tools.logging :as log]
             [mailseq.filter :as flt]
-            [mailseq.folder :as folder]
+            [mailseq.imap.folder :as folder]
             [mailseq.parse :as parse])
   (:import [jakarta.mail Folder Message UIDFolder UIDFolder$FetchProfileItem
             FetchProfile FetchProfile$Item]
-           [jakarta.mail.search AndTerm ComparisonTerm SentDateTerm]
-           [java.util Date]
-           [java.text SimpleDateFormat]))
+           [jakarta.mail.search AndTerm ComparisonTerm SentDateTerm]))
 
 ;; ---------------------------------------------------------------------------
 ;; FetchProfile for efficient batch retrieval
@@ -44,28 +42,14 @@
 ;; Date filter
 ;; ---------------------------------------------------------------------------
 
-(defn- parse-date
-  "Parse a date string or return a Date as-is."
-  [d]
-  (cond
-    (instance? Date d) d
-    (string? d)        (or (some (fn [fmt]
-                                   (try (.parse (SimpleDateFormat. fmt) d)
-                                        (catch Exception _ nil)))
-                                 ["yyyy-MM-dd" "yyyy-MM-dd'T'HH:mm:ss" "dd/MM/yyyy"])
-                           (throw (IllegalArgumentException.
-                                   (str "Cannot parse date: " (pr-str d)))))
-    :else              (throw (IllegalArgumentException.
-                               (str "Expected a Date or date string, got: " (type d))))))
-
 (defn- build-date-term
   "Build a `SentDateTerm` (or `AndTerm`) from `:since`/`:before`, or
   nil when neither is present. This is the only server-side term
   mailseq uses — full-text SEARCH verbs are out of scope."
   [{:keys [since before]}]
   (let [terms (cond-> []
-                since  (conj (SentDateTerm. ComparisonTerm/GE (parse-date since)))
-                before (conj (SentDateTerm. ComparisonTerm/LT (parse-date before))))]
+                since  (conj (SentDateTerm. ComparisonTerm/GE (flt/->date since)))
+                before (conj (SentDateTerm. ComparisonTerm/LT (flt/->date before))))]
     (case (count terms)
       0 nil
       1 (first terms)
@@ -102,18 +86,27 @@
     (into []
           (keep (fn [msg]
                   (try
-                    (let [parsed (assoc-stable-id (parse/message->map msg parse-opts))]
-                      (when (or (:message-id parsed)
-                                (:subject parsed)
-                                (seq (:from parsed))
-                                (:date-sent parsed))
-                        parsed))
+                    (assoc-stable-id (parse/message->map msg parse-opts))
                     (catch Exception e
                       (log/warn "Skipping message"
                                 (.getMessageNumber msg)
                                 "- failed to parse:" (.getMessage e))
                       nil))))
           msgs)))
+
+;; ---------------------------------------------------------------------------
+;; Folder lifecycle
+;; ---------------------------------------------------------------------------
+
+(defmacro ^:private with-folder
+  "Open `folder-name` in read-only mode on `conn`, bind it to `sym`,
+  execute `body`, and ensure the folder is closed on exit."
+  [[sym conn folder-name] & body]
+  `(let [~sym (folder/open-folder ~conn ~folder-name)]
+     (try
+       ~@body
+       (finally
+         (folder/close-folder ~sym)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public API
@@ -190,24 +183,21 @@
    ;; common contract. validate-opts rejects anything else, matching
    ;; the strictness Maildir has always had.
    (flt/validate-opts opts #{:raw?})
-   (let [folder (folder/open-folder conn folder-name)]
-     (try
-       (let [date-term (build-date-term opts)
-             limit     (:limit opts)
-             msgs      (cond
-                         date-term
-                         (apply-limit (.search folder date-term) limit)
-                         ;; limit-only: use UID range to avoid loading all messages
-                         (some? limit)
-                         (fetch-by-uid-limit folder limit)
-                         ;; No criteria at all: load everything
-                         :else
-                         (.getMessages folder))]
-         (if (:raw? opts)
-           (vec msgs)
-           (fetch-and-parse folder msgs opts)))
-       (finally
-         (folder/close-folder folder))))))
+   (with-folder [folder conn folder-name]
+     (let [date-term (build-date-term opts)
+           limit     (:limit opts)
+           msgs      (cond
+                       date-term
+                       (apply-limit (.search folder date-term) limit)
+                       ;; limit-only: use UID range to avoid loading all messages
+                       (some? limit)
+                       (fetch-by-uid-limit folder limit)
+                       ;; No criteria at all: load everything
+                       :else
+                       (.getMessages folder))]
+       (if (:raw? opts)
+         (vec msgs)
+         (fetch-and-parse folder msgs (flt/parse-opts opts)))))))
 
 (defn by-uid
   "Fetch messages by their IMAP UIDs.
@@ -220,19 +210,17 @@
     (by-uid conn \"INBOX\" [12345 12346 12347])"
   ([conn folder-name uids] (by-uid conn folder-name uids {}))
   ([conn folder-name uids opts]
-   (let [folder (folder/open-folder conn folder-name)]
-     (try
-       (let [uid-folder ^UIDFolder folder
-             uid-seq  (if (coll? uids) uids [uids])
-             msgs     (into-array Message
-                                  (keep #(try (.getMessageByUID uid-folder (long %))
-                                              (catch Exception _ nil))
-                                        uid-seq))]
-         (if (:raw? opts)
-           (vec msgs)
-           (fetch-and-parse folder msgs opts)))
-       (finally
-         (folder/close-folder folder))))))
+   (flt/validate-opts opts #{:raw?})
+   (with-folder [folder conn folder-name]
+     (let [uid-folder ^UIDFolder folder
+           uid-seq  (if (coll? uids) uids [uids])
+           msgs     (into-array Message
+                                (keep #(try (.getMessageByUID uid-folder (long %))
+                                            (catch Exception _ nil))
+                                      uid-seq))]
+       (if (:raw? opts)
+         (vec msgs)
+         (fetch-and-parse folder msgs (flt/parse-opts opts)))))))
 
 (defn by-uid-range
   "Fetch messages within a UID range [start, end] inclusive.
@@ -244,13 +232,31 @@
     (by-uid-range conn \"INBOX\" 1000 UIDFolder/LASTUID)"
   ([conn folder-name start end] (by-uid-range conn folder-name start end {}))
   ([conn folder-name start end opts]
-   (let [folder (folder/open-folder conn folder-name)]
-     (try
-       (let [uid-folder ^UIDFolder folder
-             msgs       (.getMessagesByUID uid-folder (long start) (long end))
-             valid      (into-array Message (remove nil? msgs))]
-         (if (:raw? opts)
-           (vec valid)
-           (fetch-and-parse folder valid opts)))
-       (finally
-         (folder/close-folder folder))))))
+   (flt/validate-opts opts #{:raw?})
+   (with-folder [folder conn folder-name]
+     (let [uid-folder ^UIDFolder folder
+           msgs       (.getMessagesByUID uid-folder (long start) (long end))
+           valid      (into-array Message (remove nil? msgs))]
+       (if (:raw? opts)
+         (vec valid)
+         (fetch-and-parse folder valid (flt/parse-opts opts)))))))
+
+(defn list-uids
+  "Return a vector of UID strings for every message in `folder-name`,
+  without fetching or parsing message content.
+
+  Opens the folder, retrieves all messages, and extracts their UIDs
+  via a lightweight FetchProfile (UID only)."
+  [conn folder-name]
+  (with-folder [folder conn folder-name]
+    (let [uid-folder ^UIDFolder folder
+          msgs       (.getMessages folder)
+          fp         (doto (FetchProfile.)
+                       (.add UIDFolder$FetchProfileItem/UID))]
+      (.fetch folder msgs fp)
+      (into []
+            (keep (fn [^Message msg]
+                    (try
+                      (str (.getUID uid-folder msg))
+                      (catch Exception _ nil))))
+            msgs))))

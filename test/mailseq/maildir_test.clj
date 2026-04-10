@@ -83,6 +83,29 @@
   (testing "unknown id returns nil"
     (is (nil? (maildir/by-id fixture-path "does-not-exist" {})))))
 
+(deftest list-ids-returns-stable-ids
+  (let [ids (maildir/list-ids fixture-path)]
+    (is (= 2 (count ids)))
+    (is (every? string? ids))
+    (testing "ids match what by-id accepts"
+      (doseq [id ids]
+        (is (some? (maildir/by-id fixture-path id {})))))))
+
+(deftest by-ids-batch-fetch
+  (let [all-ids (maildir/list-ids fixture-path)
+        msgs    (maildir/by-ids fixture-path (set all-ids) {})]
+    (is (= 2 (count msgs)))
+    (is (every? :id msgs))
+    (testing "fetching a subset"
+      (let [one-id  (first all-ids)
+            subset  (maildir/by-ids fixture-path #{one-id} {})]
+        (is (= 1 (count subset)))
+        (is (= one-id (:id (first subset))))))
+    (testing "empty set returns empty"
+      (is (empty? (maildir/by-ids fixture-path #{} {}))))
+    (testing "unknown ids are silently skipped"
+      (is (empty? (maildir/by-ids fixture-path #{"no-such-id"} {}))))))
+
 (deftest invalid-maildir-throws
   (is (thrown? clojure.lang.ExceptionInfo
                (maildir/messages "/tmp/definitely-not-a-maildir-xyz" {}))))
@@ -105,6 +128,14 @@
 (deftest with-source-macro
   (mailseq/with-source [src {:type :maildir :folders {"INBOX" fixture-path}}]
     (is (= 2 (count (mailseq/messages src "INBOX" {}))))))
+
+(deftest with-source-propagates-exception
+  (testing "exception in body propagates out of with-source"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"boom"
+                          (mailseq/with-source [s {:type :maildir
+                                                   :folders {"INBOX" fixture-path}}]
+                            (mailseq/messages s "INBOX")
+                            (throw (ex-info "boom" {})))))))
 
 (deftest unsupported-type
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported source type"

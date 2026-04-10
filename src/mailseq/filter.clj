@@ -123,3 +123,8 @@
     (if (and limit (< limit (count filtered)))
       (subvec filtered (- (count filtered) limit))
       filtered)))
+
+(defn parse-opts
+  "Extract the keys that `message->map` cares about from an opts map."
+  [opts]
+  (select-keys opts [:headers? :body? :attachments?]))

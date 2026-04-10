@@ -78,6 +78,20 @@
         (is (nil? (get-in m [:body :attachments])))
         (is (some? (get-in m [:body :text])))))))
 
+(deftest parse-message-with-attachment
+  (let [msg (load-eml "emails/with-attachment.eml")
+        m   (parse/message->map msg)]
+    (testing "envelope fields"
+      (is (= "<test-003@example.com>" (:message-id m)))
+      (is (some? (:subject m))))
+    (testing "has attachments"
+      (is (seq (get-in m [:body :attachments]))))
+    (testing "attachment fields"
+      (let [att (first (get-in m [:body :attachments]))]
+        (is (string? (:filename att)))
+        (is (string? (:content-type att)))
+        (is (bytes? (:data att)))))))
+
 (deftest headers-extraction
   (let [msg (load-eml "emails/simple-multipart.eml")
         m   (parse/message->map msg)]

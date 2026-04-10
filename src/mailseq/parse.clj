@@ -8,7 +8,7 @@
   This is the core of the library: robust handling of MIME multipart
   messages, encoded headers, attachments, and charset variations."
   (:require [clojure.string :as str])
-  (:import [jakarta.mail Message Message$RecipientType Part]
+  (:import [jakarta.mail Flags Flags$Flag Message Message$RecipientType Part]
            [jakarta.mail.internet InternetAddress MimeMessage MimeMultipart MimeUtility]
            [java.io InputStream ByteArrayOutputStream]))
 
@@ -27,7 +27,7 @@
   "Convert an array of Address objects to a vector of maps."
   [addrs]
   (when addrs
-    (mapv (fn [addr] (parse-address addr)) addrs)))
+    (mapv parse-address addrs)))
 
 ;; ---------------------------------------------------------------------------
 ;; Header parsing
@@ -44,35 +44,36 @@
 (defn- get-all-headers
   "Extract all headers as a map. Multi-valued headers become vectors."
   [^MimeMessage msg]
-  (let [hdrs (.getAllHeaders msg)]
-    (loop [result (transient {})]
-      (if (.hasMoreElements hdrs)
-        (let [h    (.nextElement hdrs)
-              name (.getName h)
-              val  (decode-header (.getValue h))
-              prev (get result name)]
-          (recur (assoc! result name
-                         (cond
-                           (nil? prev)    val
-                           (vector? prev) (conj prev val)
-                           :else          [prev val]))))
-        (persistent! result)))))
+  (reduce (fn [acc h]
+            (let [name (.getName h)
+                  val  (decode-header (.getValue h))
+                  prev (get acc name)]
+              (assoc acc name
+                     (cond
+                       (nil? prev)    val
+                       (vector? prev) (conj prev val)
+                       :else          [prev val]))))
+          {}
+          (enumeration-seq (.getAllHeaders msg))))
 
 ;; ---------------------------------------------------------------------------
 ;; Body / MIME part parsing
 ;; ---------------------------------------------------------------------------
 
 (defn- input-stream->bytes
-  "Read an InputStream into a byte array."
+  "Read an InputStream into a byte array, closing the stream when done."
   [^InputStream is]
-  (let [baos (ByteArrayOutputStream.)]
-    (let [buf (byte-array 8192)]
+  (try
+    (let [baos (ByteArrayOutputStream.)
+          buf  (byte-array 8192)]
       (loop []
         (let [n (.read is buf)]
           (when (pos? n)
             (.write baos buf 0 n)
-            (recur)))))
-    (.toByteArray baos)))
+            (recur))))
+      (.toByteArray baos))
+    (finally
+      (.close is))))
 
 (defn- content-type-base
   "Extract the base MIME type from a content-type string, e.g.
@@ -145,27 +146,31 @@
 
 (defn- walk-multipart
   "Recursively walk a MimeMultipart, collecting text bodies and attachments."
-  [^MimeMultipart mp result]
+  [^MimeMultipart mp result attachments?]
   (let [cnt (.getCount mp)]
     (loop [i 0 res result]
       (if (< i cnt)
-        (recur (inc i) (walk-parts (.getBodyPart mp i) res))
+        (recur (inc i) (walk-parts (.getBodyPart mp i) res attachments?))
         res))))
 
 (defn- walk-parts
-  "Walk a MIME Part tree, accumulating :text, :html, and :attachments."
-  [^Part part result]
+  "Walk a MIME Part tree, accumulating :text, :html, and :attachments.
+  When `attachments?` is false, attachment parts are skipped entirely
+  (no byte reads)."
+  [^Part part result attachments?]
   (let [ct (content-type-base (.getContentType part))]
     (cond
       ;; Attachment - any disposition=attachment or inline with filename (non-text)
       (attachment? part)
-      (update result :attachments (fnil conj []) (parse-attachment part))
+      (if attachments?
+        (update result :attachments (fnil conj []) (parse-attachment part))
+        result)
 
       ;; Multipart container - recurse
       (and ct (str/starts-with? ct "multipart/"))
       (let [content (try (.getContent part) (catch Exception _ nil))]
         (if (instance? MimeMultipart content)
-          (walk-multipart content result)
+          (walk-multipart content result attachments?)
           result))
 
       ;; Plain text body
@@ -184,26 +189,34 @@
 
       ;; Other text/* types (e.g. text/calendar) - store as attachment-like
       (and ct (str/starts-with? ct "text/"))
-      (update result :attachments (fnil conj [])
-              {:filename     (decode-header (.getFileName part))
-               :content-type ct
-               :data         (.getBytes (or (parse-text-content part) "") "UTF-8")})
-
-      ;; Binary inline content without attachment disposition
-      :else
-      (try
+      (if attachments?
         (update result :attachments (fnil conj [])
                 {:filename     (decode-header (.getFileName part))
                  :content-type ct
-                 :size         (.getSize part)
-                 :data         (input-stream->bytes (.getInputStream part))})
-        (catch Exception _ result)))))
+                 :data         (.getBytes (or (parse-text-content part) "") "UTF-8")})
+        result)
+
+      ;; Binary inline content without attachment disposition
+      :else
+      (if attachments?
+        (try
+          (update result :attachments (fnil conj [])
+                  {:filename     (decode-header (.getFileName part))
+                   :content-type ct
+                   :size         (.getSize part)
+                   :data         (input-stream->bytes (.getInputStream part))})
+          (catch Exception _ result))
+        result))))
 
 (defn- parse-body
   "Parse the body of a MimeMessage, returning a map with :text, :html,
-  and :attachments keys."
-  [^MimeMessage msg]
-  (walk-parts msg {:text nil :html nil :attachments []}))
+  and :attachments keys. When `attachments?` is false, attachment parts
+  are skipped entirely (no byte reads)."
+  [^MimeMessage msg attachments?]
+  (let [result (walk-parts msg {:text nil :html nil :attachments []} attachments?)]
+    (if attachments?
+      result
+      (dissoc result :attachments))))
 
 ;; ---------------------------------------------------------------------------
 ;; Message UID
@@ -228,8 +241,11 @@
   Returns a map with keys:
     :uid          - IMAP UID (long, or nil if unavailable)
     :message-id   - Message-ID header
-    :message-number - sequence number in folder
+    :message-number - sequence number in folder (backend may dissoc this)
     :size         - message size in bytes (-1 if unknown)
+
+  The backend adds `:id` (a stable string identifier) after parsing:
+  UID-as-string for IMAP, filename prefix for Maildir.
     :from         - vector of {:name :address} maps
     :to           - vector of {:name :address} maps
     :cc           - vector of {:name :address} maps
@@ -257,8 +273,8 @@
    (let [mime-msg  ^MimeMessage msg
          safe      (fn [f] (try (f) (catch Exception _ nil)))
          body-data (when body?
-                     (safe #(parse-body mime-msg)))
-         flags     ^jakarta.mail.Flags (safe #(.getFlags msg))]
+                     (safe #(parse-body mime-msg attachments?)))
+         flags     ^Flags (safe #(.getFlags msg))]
      (cond-> {:uid            (get-uid msg)
               :message-id     (safe #(.getMessageID mime-msg))
               :message-number (safe #(.getMessageNumber msg))
@@ -273,19 +289,19 @@
               :date-received  (safe #(.getReceivedDate msg))
               :content-type   (safe #(.getContentType msg))
               :flags          (if flags
-                                (cond-> #{}
-                                  (.contains flags jakarta.mail.Flags$Flag/SEEN)     (conj :seen)
-                                  (.contains flags jakarta.mail.Flags$Flag/ANSWERED) (conj :answered)
-                                  (.contains flags jakarta.mail.Flags$Flag/FLAGGED)  (conj :flagged)
-                                  (.contains flags jakarta.mail.Flags$Flag/DELETED)  (conj :deleted)
-                                  (.contains flags jakarta.mail.Flags$Flag/DRAFT)    (conj :draft)
-                                  (.contains flags jakarta.mail.Flags$Flag/RECENT)   (conj :recent))
+                                (into #{}
+                                      (keep (fn [[^Flags$Flag flag kw]]
+                                              (when (.contains flags flag) kw)))
+                                      [[Flags$Flag/SEEN     :seen]
+                                       [Flags$Flag/ANSWERED :answered]
+                                       [Flags$Flag/FLAGGED  :flagged]
+                                       [Flags$Flag/DELETED  :deleted]
+                                       [Flags$Flag/DRAFT    :draft]
+                                       [Flags$Flag/RECENT   :recent]])
                                 #{})}
 
        body?
-       (assoc :body (if attachments?
-                      body-data
-                      (dissoc body-data :attachments)))
+       (assoc :body body-data)
 
        headers?
        (assoc :headers (or (safe #(get-all-headers mime-msg)) {}))))))

@@ -2,6 +2,10 @@
 
 [[https://clojars.org/org.clojars.bzg/mailseq][https://img.shields.io/clojars/v/org.clojars.bzg/mailseq.svg]]
 
+A read-only Clojure library for fetching and parsing email from IMAP
+servers and Maildir directories through a unified API. Every message
+is returned as a plain Clojure map.
+
 * Installation
 
 deps.edn:
@@ -19,20 +23,29 @@ Leiningen:
 * Quick start
 
 #+begin_src clojure
-(require '[mailseq.core :as imap]
-         '[mailseq.fetch :as fetch])
+(require '[mailseq :as mailseq])
 
-;; Connect and fetch the 10 most recent messages
-(imap/with-connection [conn {:host "imap.example.com"
-                             :user "me@example.com"
-                             :password "secret"}]
-  (fetch/messages conn "INBOX" {:limit 10}))
+;; IMAP
+(mailseq/with-source [src {:type :imap
+                           :host "imap.example.com"
+                           :user "me@example.com"
+                           :password "secret"
+                           :folders {"INBOX"   "INBOX"
+                                     "Clojure" "Lists/clojure"}}]
+  (mailseq/messages src "INBOX" {:limit 10}))
+
+;; Maildir
+(mailseq/with-source [src {:type :maildir
+                           :folders {"INBOX" "/home/me/Mail"
+                                     "Sent"  "/home/me/Mail/.Sent"}}]
+  (mailseq/messages src "INBOX" {:since "2025-01-01" :limit 50}))
 #+end_src
 
-Each message is returned as a Clojure map:
+Both backends return the same message map structure:
 
 #+begin_src clojure
-{:uid            12345
+{:id             "12345"              ;; backend-specific stable id
+ :uid            12345                ;; IMAP UID (nil for Maildir)
  :message-id     "<abc@example.com>"
  :from           [{:name "Alice" :address "alice@example.com"}]
  :to             [{:name "Bob" :address "bob@example.com"}]
@@ -53,56 +66,146 @@ Each message is returned as a Clojure map:
  :headers        {"Subject" "Hello from mailseq" ...}}
 #+end_src
 
-* API
+* Unified API (=mailseq=)
 
-** Connection (=mailseq.core=)
+** Opening a source
+
+=mailseq/open= creates a source from a config map. Every source
+requires a =:type= (=:imap= or =:maildir=) and a =:folders= map from
+logical folder names to backend-specific locations.
 
 #+begin_src clojure
-;; Connect
+;; IMAP: logical name -> server folder name
+(def src (mailseq/open {:type :imap
+                        :host "imap.example.com"
+                        :user "me@example.com"
+                        :password "secret"
+                        :folders {"INBOX" "INBOX"
+                                  "Sent"  "Sent"}}))
+
+;; Maildir: logical name -> absolute directory path
+(def src (mailseq/open {:type :maildir
+                        :folders {"INBOX" "/home/me/Mail"
+                                  "Sent"  "/home/me/Mail/.Sent"}}))
+#+end_src
+
+Sources implement =java.io.Closeable=. Use =mailseq/with-source= for
+automatic cleanup:
+
+#+begin_src clojure
+(mailseq/with-source [src {:type :maildir
+                           :folders {"INBOX" "/home/me/Mail"}}]
+  (mailseq/messages src "INBOX"))
+#+end_src
+
+** Fetching messages
+
+#+begin_src clojure
+;; All messages
+(mailseq/messages src "INBOX")
+
+;; With selection options
+(mailseq/messages src "INBOX" {:since  "2025-01-01"
+                               :before "2025-07-01"
+                               :limit  20})
+
+;; Lightweight fetch (skip body/headers/attachments)
+(mailseq/messages src "INBOX" {:limit 100
+                               :body? false
+                               :headers? false})
+#+end_src
+
+Selection options (identical for all backends):
+
+| Option          | Type          | Description                                |
+|-----------------+---------------+--------------------------------------------|
+| =:since=        | Date / string | messages sent on/after this date            |
+| =:before=       | Date / string | messages sent strictly before this date     |
+| =:limit=        | int           | keep the last N most recent messages        |
+| =:headers?=     | boolean       | include the full header map (default: true) |
+| =:body?=        | boolean       | parse body content (default: true)          |
+| =:attachments?= | boolean       | include attachment bytes (default: true)    |
+
+Full-text search on subject, from, etc. is intentionally out of scope.
+Filter the returned sequence yourself if needed.
+
+** Fetching a single message
+
+#+begin_src clojure
+;; By backend-specific id (UID string for IMAP, filename prefix for Maildir)
+(mailseq/by-id src "INBOX" "12345")  ;; => message map or nil
+#+end_src
+
+** Incremental fetching (=list-ids= / =by-ids=)
+
+For use cases where you process messages once and want to skip
+already-seen messages on subsequent runs (e.g. a batch indexer):
+
+#+begin_src clojure
+;; Step 1: get all ids (cheap — no file content is read for Maildir,
+;;         only UIDs are fetched for IMAP)
+(def all-ids (mailseq/list-ids src "INBOX"))
+
+;; Step 2: diff against your own persistence
+(def new-ids (remove already-seen? all-ids))
+
+;; Step 3: fetch only the new messages in one pass
+(def new-msgs (mailseq/by-ids src "INBOX" (set new-ids)))
+#+end_src
+
+** Listing folders
+
+#+begin_src clojure
+(mailseq/list-folders src)  ;; => ["INBOX" "Sent"]
+#+end_src
+
+Returns only the logical folder names from your config, never a
+server/filesystem scan.
+
+* IMAP-specific API
+
+For advanced IMAP use cases, the lower-level namespaces are available
+under =mailseq.imap.*=.
+
+** Connection (=mailseq.imap.connect=)
+
+#+begin_src clojure
+(require '[mailseq.imap.connect :as imap])
+
 (def conn (imap/connect {:host "imap.example.com"
                          :port 993
                          :ssl true
                          :user "me@example.com"
                          :password "secret"}))
 
-;; Check connection
-(imap/connected? conn) ;; => true
-
-;; Disconnect
+(imap/connected? conn)  ;; => true
 (imap/disconnect conn)
-
-;; Or use the macro for automatic cleanup
-(imap/with-connection [conn {...}]
-  ...)
 #+end_src
 
-OAuth2 is supported — pass =:oauth2-token= instead of =:password=.
+OAuth2 is supported: pass =:oauth2-token= instead of =:password=.
 
-** Fetching messages (=mailseq.fetch=)
+** Fetching (=mailseq.imap.fetch=)
 
 #+begin_src clojure
-;; Fetch recent messages
-(fetch/messages conn "INBOX" {:limit 20})
+(require '[mailseq.imap.fetch :as fetch])
 
 ;; Fetch by date range
-(fetch/messages conn "INBOX" {:since "2025-01-01" :before "2025-02-01"})
+(fetch/messages conn "INBOX" {:since "2025-01-01" :limit 20})
 
-;; Fetch by UID (e.g. relative to the last UID you saw)
+;; Fetch by UID
 (fetch/by-uid conn "INBOX" [12345 12346])
 
 ;; Fetch everything newer than a known UID
 (fetch/by-uid-range conn "INBOX" 12347 jakarta.mail.UIDFolder/LASTUID)
 
-;; Lightweight fetch (skip body parsing)
-(fetch/messages conn "INBOX" {:limit 100
-                               :body? false
-                               :headers? false})
+;; Raw Jakarta Mail Message objects (IMAP only)
+(fetch/messages conn "INBOX" {:limit 5 :raw? true})
 #+end_src
 
-** Folders (=mailseq.folder=)
+** Folders (=mailseq.imap.folder=)
 
 #+begin_src clojure
-(require '[mailseq.folder :as folder])
+(require '[mailseq.imap.folder :as folder])
 
 (folder/list-folders conn)
 ;; => [{:name "INBOX" :full-name "INBOX" :type :holds-messages
@@ -112,12 +215,11 @@ OAuth2 is supported — pass =:oauth2-token= instead of =:password=.
 (folder/unread-count conn "INBOX")   ;; => 3
 #+end_src
 
-** IDLE / push notifications (=mailseq.idle=)
+** IDLE / push notifications (=mailseq.imap.idle=)
 
 #+begin_src clojure
-(require '[mailseq.idle :as idle])
+(require '[mailseq.imap.idle :as idle])
 
-;; Blocking — run in a future or thread
 (def idle-thread
   (idle/idle-async conn "INBOX"
     (fn [msg]
@@ -127,13 +229,58 @@ OAuth2 is supported — pass =:oauth2-token= instead of =:password=.
 (.interrupt idle-thread)
 #+end_src
 
+* Maildir backend
+
+The Maildir backend reads =cur/= and =new/= subdirectories (never
+=tmp/=). It never moves or modifies files. Each directory in the
+=:folders= config must be a valid Maildir (containing =cur/= and
+=new/=).
+
+Backend-specific behavior:
+- =:id= is the stable filename prefix (before the =:2,= flag suffix)
+- =:uid= is always =nil=
+- =:date-received= is the file's =mtime=
+- =:flags= are decoded from the standard Maildir suffix (=R=, =S=, =T=, =D=, =F=)
+
+The IMAP connection is *not* thread-safe (Jakarta Mail limitation).
+Maildir is safe for concurrent reads.
+
+** Watching for new messages (=mailseq.maildir.watch=)
+
+#+begin_src clojure
+(require '[mailseq.maildir.watch :as watch])
+
+;; Async — returns a Thread, call .interrupt to stop
+(def watcher
+  (watch/watch-async "/home/me/Mail"
+    (fn [msg]
+      (println "New:" (:subject msg)))
+    {:parse-opts {:attachments? false}}))
+
+;; Later:
+(.interrupt watcher)
+#+end_src
+
+Uses =java.nio.file.WatchService= (inotify on Linux, kqueue on
+macOS). Existing messages at startup are recorded as seen — only
+truly new files trigger the callback. A set of seen stable ids
+prevents processing the same message twice when a MUA moves a file
+from =new/= to =cur/=.
+
 * Design principles
 
-- *Read-only* — no sending, writing, moving, or deleting
-- *Data-oriented* — all inputs and outputs are plain Clojure maps
-- *Minimal API surface* — fewer functions means less to maintain and learn
-- *Thin wrapper* — for advanced use cases, interop with Jakarta Mail directly
-- *Zero extra dependencies* — only Eclipse Angus Mail, nothing else
+- *Read-only* -- no sending, writing, moving, or deleting. The
+  =MailSource= protocol has no mutating methods; adding one requires
+  modifying the protocol itself.
+- *Data-oriented* -- all inputs and outputs are plain Clojure maps.
+- *Explicit folders* -- no server/filesystem discovery. You list
+  exactly which folders to read in your config.
+- *Identical results across backends* -- the same =.eml= file read
+  through IMAP and Maildir produces the same Clojure map (modulo
+  =:uid=, =:id=, =:date-received=). Enforced by cross-backend tests.
+- *Minimal filtering* -- only date range and limit. No substring
+  search (inconsistent across IMAP servers).
+- *Zero extra dependencies* -- only Eclipse Angus Mail.
 
 * Building & deploying
 
@@ -168,6 +315,6 @@ donating to [[https://clojuriststogether.org][clojuriststogether.org]].
 
 * License
 
-Copyright © 2026 Bastien Guerry
+Copyright (c) 2026 Bastien Guerry
 
 Distributed under the Eclipse Public License 2.0.

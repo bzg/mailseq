@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: EPL-2.0
 ;; License-Filename: LICENSES/EPL-2.0.txt
 
-(ns mailseq.folder
+(ns mailseq.imap.folder
   "IMAP folder operations: list, open, close, and query folders."
   (:import [jakarta.mail Folder Store]))
 
