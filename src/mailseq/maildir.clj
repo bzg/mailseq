@@ -39,7 +39,7 @@
    \D :draft
    \F :flagged})
 
-(defn- parse-flags
+(defn ^:no-doc parse-flags
   "Decode the `:2,XYZ` suffix of a Maildir filename into a set of flag
   keywords. Returns `#{}` when the suffix is missing or empty."
   [^String filename]
@@ -49,11 +49,12 @@
       (let [letters (.substring filename (+ idx 3))]
         (into #{} (keep flag-char->keyword) letters)))))
 
-(defn- stable-id
+(defn ^:no-doc stable-id
   "Return the portion of the filename before the `:2,` suffix. This is
   the part Maildir guarantees to be stable across flag changes, so it
   is a safe identifier for `-by-id` even as a client re-flags a
-  message."
+  message.
+  Also used by `mailseq.maildir.watch`."
   [^String filename]
   (let [idx (.indexOf filename ":2,")]
     (if (neg? idx) filename (.substring filename 0 idx))))
@@ -71,9 +72,10 @@
     (concat (when (.isDirectory cur) (filter #(.isFile ^File %) (.listFiles cur)))
             (when (.isDirectory new) (filter #(.isFile ^File %) (.listFiles new))))))
 
-(defn- validate-maildir!
+(defn ^:no-doc validate-maildir!
   "Throw an ex-info if `path` is not a usable Maildir. We require the
-  directory to exist and contain at least `cur/` and `new/`."
+  directory to exist and contain at least `cur/` and `new/`.
+  Also used by `mailseq.maildir.watch`."
   [^File path]
   (when-not (.isDirectory path)
     (throw (ex-info (str "Not a directory: " (.getAbsolutePath path))
@@ -135,10 +137,11 @@
                 "- failed to parse:" (.getMessage e))
       nil)))
 
-(defn- file->map
+(defn ^:no-doc file->map
   "Read one Maildir file and parse it into a message map, overriding
   the keys that are Maildir-specific (id, flags, date-received, uid).
-  Returns nil and logs a warning if the file cannot be read or parsed."
+  Returns nil and logs a warning if the file cannot be read or parsed.
+  Also used by `mailseq.maildir.watch`."
   [^File f parse-opts]
   (when-let [env (file->envelope f)]
     (envelope->map env parse-opts)))
@@ -148,11 +151,14 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- sort-for-limit
-  "Sort messages oldest-first by `:date-sent`, with nil-dated messages
-  at the head. This places the freshest dated messages at the tail,
-  which is the stable slice `apply-opts` picks when `:limit` is set."
+  "Sort messages oldest-first by `:date-sent`, falling back to
+  `:date-received` (file mtime) when `:date-sent` is nil. This places
+  the freshest messages at the tail, which is the stable slice
+  `apply-opts` picks when `:limit` is set."
   [messages]
   (sort-by (fn [m] (or (some-> ^Date (:date-sent m) .getTime)
+                       (some-> ^Date (:date-received m) .getTime)
+                       (some-> ^File (:file m) .lastModified)
                        Long/MIN_VALUE))
            messages))
 

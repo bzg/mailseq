@@ -102,7 +102,7 @@
 
   Options not in the match set (`:limit`, `:headers?`, …) are
   silently passed through — they do not influence the decision."
-  [m {:keys [since before] :as _opts}]
+  [m {:keys [since before]}]
   (and (or (nil? since)  (since? m since))
        (or (nil? before) (before? m before))))
 

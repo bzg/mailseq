@@ -32,12 +32,26 @@
 
   (-by-id [this folder-name id opts]
     "Return a single message map (or nil) from `folder-name` identified
-    by the backend's stable id. For IMAP, `id` is a UID (long).")
+    by the backend's stable id (long, string, or backend-specific).")
 
   (-by-ids [this folder-name ids opts]
     "Return a vector of message maps for the given set of ids.
     More efficient than repeated `-by-id` calls: a single filesystem
     or server round-trip.")
+
+  (-watch [this folder-name on-message opts]
+    "Start watching `folder-name` for new messages, calling `on-message`
+    with each parsed message map. Blocks the current thread.
+    For IMAP, delegates to IDLE; for Maildir, delegates to WatchService.")
+
+  (-watch-async [this folder-name on-message opts]
+    "Like `-watch` but starts in a new daemon thread. Returns a Thread.
+    Call `(.interrupt thread)` to stop.")
+
+  (-by-id-range [this folder-name start-id end-id opts]
+    "Return a vector of message maps whose ids fall in [start-id, end-id].
+    For IMAP, delegates to UID-range fetch. For Maildir, filters `list-ids`
+    by lexicographic comparison. `end-id` may be nil to mean \"to the end\".")
 
   (-close [this]
     "Release any resources held by this source. Idempotent."))

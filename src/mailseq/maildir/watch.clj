@@ -19,16 +19,12 @@
   we already saw in `new/`."
   (:require [clojure.java.io :as io]
             [clojure.tools.logging :as log]
-            [mailseq.filter :as flt])
+            [mailseq.filter :as flt]
+            [mailseq.maildir :as maildir])
   (:import [java.io File]
            [java.nio.file FileSystems Path StandardWatchEventKinds
             WatchEvent WatchKey WatchService]
            [java.util.concurrent TimeUnit]))
-
-;; Access maildir internals via var references (same library, not public API)
-(def ^:private stable-id       #'mailseq.maildir/stable-id)
-(def ^:private file->map       #'mailseq.maildir/file->map)
-(def ^:private validate-maildir! #'mailseq.maildir/validate-maildir!)
 
 (defn- register-dirs!
   "Register `cur/` and `new/` under `path` for ENTRY_CREATE events.
@@ -70,8 +66,8 @@
                             on-error   #(log/error % "Maildir watch error")
                             settle-ms  50}}]
    (let [dir (io/file path)]
-     (validate-maildir! dir)
-     (let [seen   (atom (set (mailseq.maildir/list-ids path)))
+     (maildir/validate-maildir! dir)
+     (let [seen   (atom (set (maildir/list-ids path)))
            ws     (.newWatchService (FileSystems/getDefault))
            keys   (register-dirs! ws dir)
            p-opts (flt/parse-opts parse-opts)]
@@ -89,12 +85,12 @@
                          (let [^Path rel-path (.context event)
                                ^File f (.toFile (.resolve ^Path watched-dir rel-path))
                                fname   (.getName f)
-                               id      (stable-id fname)]
+                               id      (maildir/stable-id fname)]
                            (when-not (contains? @seen id)
                              (swap! seen conj id)
                              (when (pos? settle-ms)
                                (Thread/sleep settle-ms))
-                             (when-let [m (file->map f p-opts)]
+                             (when-let [m (maildir/file->map f p-opts)]
                                (on-message m))))
                          (catch InterruptedException _ nil)
                          (catch Exception e (on-error e)))))

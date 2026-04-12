@@ -11,13 +11,13 @@ is returned as a plain Clojure map.
 deps.edn:
 
 #+begin_src clojure
-org.clojars.bzg/mailseq {:mvn/version "0.0.2"}
+org.clojars.bzg/mailseq {:mvn/version "0.0.3"}
 #+end_src
 
 Leiningen:
 
 #+begin_src clojure
-[org.clojars.bzg/mailseq "0.0.2"]
+[org.clojars.bzg/mailseq "0.0.3"]
 #+end_src
 
 * Quick start
@@ -151,6 +151,55 @@ already-seen messages on subsequent runs (e.g. a batch indexer):
 ;; Step 3: fetch only the new messages in one pass
 (def new-msgs (mailseq/by-ids src "INBOX" (set new-ids)))
 #+end_src
+
+** Watching for new messages
+
+The =watch-async= function works identically for IMAP IDLE and Maildir
+WatchService:
+
+#+begin_src clojure
+(def t (mailseq/watch-async src "INBOX"
+         (fn [msg] (println "New:" (:subject msg)))
+         {:parse-opts {:attachments? false}}))
+
+;; Later:
+(.interrupt t)
+#+end_src
+
+Options are passed through to the backend: =:heartbeat-ms= for IMAP,
+=:settle-ms= for Maildir. Both accept =:parse-opts= and =:on-error=.
+
+A blocking variant =mailseq/watch= is also available.
+
+** Incremental fetching by id range
+
+For watermark-based incremental fetching (common in IMAP with UID
+watermarks), =by-id-range= delegates to the most efficient backend
+operation:
+
+#+begin_src clojure
+;; Fetch everything newer than the last known UID
+(mailseq/by-id-range src "INBOX" (str (inc last-uid)) nil)
+
+;; Fetch a specific range
+(mailseq/by-id-range src "INBOX" "1000" "2000")
+#+end_src
+
+Pass =nil= as =end-id= to fetch from =start-id= to the latest message.
+
+** Accessing the underlying IMAP connection
+
+When you need IMAP-specific operations that the unified API does not
+cover, =underlying-conn= returns the raw connection map:
+
+#+begin_src clojure
+(when-let [conn (mailseq/underlying-conn src)]
+  ;; conn has :store and :session — use with mailseq.imap.* namespaces
+  (mailseq.imap.folder/list-folders conn))
+#+end_src
+
+Returns =nil= for non-IMAP sources. This is a stable part of the public
+API.
 
 ** Listing folders
 

@@ -33,9 +33,14 @@
 
 (def ^:private fixtures
   "Seq of [message-id file] pairs delivered to both backends."
-  [["<test-002@example.com>" (io/file "dev-resources/emails/plain-text.eml")]
-   ["<test-001@example.com>" (io/file "dev-resources/emails/simple-multipart.eml")]
-   ["<test-003@example.com>" (io/file "dev-resources/emails/with-attachment.eml")]])
+  [["<test-002@example.com>"          (io/file "dev-resources/emails/plain-text.eml")]
+   ["<test-001@example.com>"          (io/file "dev-resources/emails/simple-multipart.eml")]
+   ["<test-003@example.com>"          (io/file "dev-resources/emails/with-attachment.eml")]
+   ["<test-latin1@example.com>"       (io/file "dev-resources/emails/latin1-undeclared.eml")]
+   ["<test-qp@example.com>"           (io/file "dev-resources/emails/quoted-printable.eml")]
+   ["<test-b64@example.com>"          (io/file "dev-resources/emails/base64-body.eml")]
+   ["<test-folded@example.com>"       (io/file "dev-resources/emails/folded-headers.eml")]
+   ["<test-mixed-rfc2047@example.com>" (io/file "dev-resources/emails/mixed-rfc2047.eml")]])
 
 (def ^:private imap-user "test@example.com")
 (def ^:private imap-pass "secret")
@@ -390,4 +395,197 @@
       (finally
         (when (.isAlive thread) (.interrupt thread))
         (imap-connect/disconnect conn)))))
+
+;; ---------------------------------------------------------------------------
+;; by-id-range — unified API on both backends
+;; ---------------------------------------------------------------------------
+
+(deftest by-id-range-on-imap
+  (mailseq/with-source [src {:type :imap
+                             :host "localhost"
+                             :port *imap-port*
+                             :ssl false
+                             :user imap-user
+                             :password imap-pass
+                             :folders {"INBOX" "INBOX"}}]
+    (let [all-ids (mailseq/list-ids src "INBOX")
+          sorted  (sort all-ids)]
+      (testing "full range returns all messages"
+        (let [msgs (mailseq/by-id-range src "INBOX" (first sorted) (last sorted))]
+          (is (= (count fixtures) (count msgs)))))
+      (testing "nil end-id means to the end"
+        (let [msgs (mailseq/by-id-range src "INBOX" (first sorted) nil)]
+          (is (= (count fixtures) (count msgs)))))
+      (testing "range from second id returns subset"
+        (when (> (count sorted) 1)
+          (let [msgs (mailseq/by-id-range src "INBOX" (second sorted) nil)]
+            (is (< (count msgs) (count all-ids)))))))))
+
+(deftest by-id-range-on-maildir
+  (let [maildir-path (make-maildir-fixture)]
+    (mailseq/with-source [src {:type :maildir
+                               :folders {"INBOX" maildir-path}}]
+      (let [all-ids (mailseq/list-ids src "INBOX")
+            sorted  (sort all-ids)]
+        (testing "full range returns all messages"
+          (let [msgs (mailseq/by-id-range src "INBOX" (first sorted) (last sorted))]
+            (is (= (count fixtures) (count msgs)))))
+        (testing "nil end-id means to the end"
+          (let [msgs (mailseq/by-id-range src "INBOX" (first sorted) nil)]
+            (is (= (count fixtures) (count msgs)))))
+        (testing "range beyond existing ids returns empty"
+          (let [msgs (mailseq/by-id-range src "INBOX" "zzzzzzz" nil)]
+            (is (empty? msgs))))))))
+
+;; ---------------------------------------------------------------------------
+;; underlying-conn
+;; ---------------------------------------------------------------------------
+
+(deftest underlying-conn-imap
+  (mailseq/with-source [src {:type :imap
+                             :host "localhost"
+                             :port *imap-port*
+                             :ssl false
+                             :user imap-user
+                             :password imap-pass
+                             :folders {"INBOX" "INBOX"}}]
+    (let [conn (mailseq/underlying-conn src)]
+      (testing "returns a connection map for IMAP"
+        (is (some? conn))
+        (is (contains? conn :store))
+        (is (contains? conn :session)))
+      (testing "connection is usable with low-level API"
+        (is (imap-connect/connected? conn))))))
+
+(deftest underlying-conn-maildir-returns-nil
+  (let [maildir-path (make-maildir-fixture)]
+    (mailseq/with-source [src {:type :maildir
+                               :folders {"INBOX" maildir-path}}]
+      (is (nil? (mailseq/underlying-conn src))))))
+
+;; ---------------------------------------------------------------------------
+;; watch-async — unified API
+;; ---------------------------------------------------------------------------
+
+(deftest watch-async-imap-starts-and-stops
+  (mailseq/with-source [src {:type :imap
+                             :host "localhost"
+                             :port *imap-port*
+                             :ssl false
+                             :user imap-user
+                             :password imap-pass
+                             :folders {"INBOX" "INBOX"}}]
+    (let [thread (mailseq/watch-async src "INBOX"
+                                      (fn [_])
+                                      {:heartbeat-ms 500})]
+      (try
+        (testing "thread is alive"
+          (is (.isAlive thread)))
+        (Thread/sleep 200)
+        (.interrupt thread)
+        (.join thread 8000)
+        (testing "thread stopped after interrupt"
+          (is (not (.isAlive thread))))
+        (finally
+          (when (.isAlive thread) (.interrupt thread)))))))
+
+;; ---------------------------------------------------------------------------
+;; Closed source throws
+;; ---------------------------------------------------------------------------
+
+;; ---------------------------------------------------------------------------
+;; Encoding fixtures: content survives parsing on both backends
+;; ---------------------------------------------------------------------------
+
+(deftest encoding-fixtures-parsed-correctly
+  (let [maildir-path (make-maildir-fixture)]
+    (mailseq/with-source [imap-src {:type :imap
+                                    :host "localhost"
+                                    :port *imap-port*
+                                    :ssl false
+                                    :user imap-user
+                                    :password imap-pass
+                                    :folders {"INBOX" "INBOX"}}]
+      (mailseq/with-source [md-src {:type :maildir
+                                    :folders {"INBOX" maildir-path}}]
+        (let [imap-by-id (index-by-message-id (mailseq/messages imap-src "INBOX"))
+              md-by-id   (index-by-message-id (mailseq/messages md-src   "INBOX"))]
+
+          (testing "Latin-1 / quoted-printable: accented body decoded"
+            (doseq [[label by-id] [["IMAP" imap-by-id] ["Maildir" md-by-id]]]
+              (testing label
+                (let [m (by-id "<test-latin1@example.com>")]
+                  (is (some? m))
+                  (is (re-find #"encodé" (get-in m [:body :text])))
+                  (is (re-find #"guillemets français" (get-in m [:body :text])))
+                  (is (= "Présentation du problème" (:subject m)))))))
+
+          (testing "Quoted-printable: soft line breaks and special chars"
+            (doseq [[label by-id] [["IMAP" imap-by-id] ["Maildir" md-by-id]]]
+              (testing label
+                (let [m (by-id "<test-qp@example.com>")]
+                  (is (some? m))
+                  (is (re-find #"éàü" (get-in m [:body :text])))
+                  (is (re-find #"needs to be wrapped" (get-in m [:body :text])))))))
+
+          (testing "Base64: body correctly decoded"
+            (doseq [[label by-id] [["IMAP" imap-by-id] ["Maildir" md-by-id]]]
+              (testing label
+                (let [m (by-id "<test-b64@example.com>")]
+                  (is (some? m))
+                  (is (re-find #"encoded in base64" (get-in m [:body :text])))
+                  (is (re-find #"éàü" (get-in m [:body :text])))))))
+
+          (testing "Folded headers: unfolded correctly"
+            (doseq [[label by-id] [["IMAP" imap-by-id] ["Maildir" md-by-id]]]
+              (testing label
+                (let [m (by-id "<test-folded@example.com>")]
+                  (is (some? m))
+                  (is (re-find #"Folded headers" (:subject m)))
+                  (is (re-find #"continuation" (:subject m)))
+                  (is (= "longname@example.com"
+                         (:address (first (:from m)))))))))
+
+          (testing "Mixed RFC 2047: UTF-8 + ISO-8859-1 in From and Subject"
+            (doseq [[label by-id] [["IMAP" imap-by-id] ["Maildir" md-by-id]]]
+              (testing label
+                (let [m (by-id "<test-mixed-rfc2047@example.com>")]
+                  (is (some? m))
+                  (is (re-find #"François" (:name (first (:from m)))))
+                  (is (re-find #"à traiter" (:subject m))))))))))))
+
+;; ---------------------------------------------------------------------------
+;; Closed source throws
+;; ---------------------------------------------------------------------------
+
+(deftest closed-imap-source-throws
+  (let [src (mailseq/open {:type :imap
+                           :host "localhost"
+                           :port *imap-port*
+                           :ssl false
+                           :user imap-user
+                           :password imap-pass
+                           :folders {"INBOX" "INBOX"}})]
+    (mailseq/close src)
+    (testing "messages after close"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"closed"
+                            (mailseq/messages src "INBOX"))))
+    (testing "list-ids after close"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"closed"
+                            (mailseq/list-ids src "INBOX"))))
+    (testing "close is idempotent"
+      (mailseq/close src))))
+
+(deftest closed-maildir-source-throws
+  (let [maildir-path (make-maildir-fixture)
+        src (mailseq/open {:type :maildir :folders {"INBOX" maildir-path}})]
+    (mailseq/close src)
+    (testing "messages after close"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"closed"
+                            (mailseq/messages src "INBOX"))))
+    (testing "list-ids after close"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"closed"
+                            (mailseq/list-ids src "INBOX"))))
+    (testing "close is idempotent"
+      (mailseq/close src))))
 

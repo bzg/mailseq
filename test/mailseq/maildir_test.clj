@@ -17,8 +17,8 @@
 ;; Flag decoding (private)
 ;; ---------------------------------------------------------------------------
 
-(def ^:private parse-flags (deref #'maildir/parse-flags))
-(def ^:private stable-id   (deref #'maildir/stable-id))
+(def ^:private parse-flags maildir/parse-flags)
+(def ^:private stable-id   maildir/stable-id)
 
 (deftest parse-flags-standard
   (is (= #{:seen}             (parse-flags "123.M1.host:2,S")))

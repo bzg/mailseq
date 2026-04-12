@@ -1,0 +1,14 @@
+From: sender@example.com
+To: receiver@example.com
+Subject: Quoted-printable body
+Date: Fri, 11 Apr 2025 09:00:00 +0000
+Message-ID: <test-qp@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+This line is short.
+This line has a soft line break at col 76 because it is quite long and need=
+s to be wrapped by the quoted-printable encoder to fit.
+Special chars: =C3=A9=C3=A0=C3=BC (=C3=A9 =3D e-acute, =C3=A0 =3D a-grav=
+e, =C3=BC =3D u-umlaut).

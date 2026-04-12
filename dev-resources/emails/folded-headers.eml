@@ -1,0 +1,12 @@
+From: "A]very Long Sender Name That Forces Folding"
+ <longname@example.com>
+To: "Another Very Long Recipient Name"
+ <recipient@example.com>
+Subject: =?UTF-8?Q?Folded_headers_=E2=80=93_this_subject_is_long_enough?=
+ =?UTF-8?Q?_to_require_continuation?=
+Date: Sun, 13 Apr 2025 08:00:00 +0000
+Message-ID: <test-folded@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=US-ASCII
+
+Message with folded (multi-line) headers.

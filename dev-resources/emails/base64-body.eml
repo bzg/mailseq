@@ -1,0 +1,11 @@
+From: sender@example.com
+To: receiver@example.com
+Subject: Base64 encoded body
+Date: Sat, 12 Apr 2025 10:00:00 +0000
+Message-ID: <test-b64@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+VGhpcyBib2R5IGlzIGVuY29kZWQgaW4gYmFzZTY0LgpTZWNvbmQgbGluZSB3aXRoIGFjY2Vu
+dHM6IMOpw6DDvC4KVGhpcmQgbGluZS4K

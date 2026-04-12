@@ -1,0 +1,10 @@
+From: =?utf-8?Q?Fran=C3=A7ois?= =?iso-8859-1?B?IE3DvGxsZXI=?= <francois@example.com>
+To: receiver@example.com
+Subject: =?utf-8?B?UmU6IE1peGVkIGVuY29kaW5ncw==?= =?iso-8859-1?Q?_=E0_traiter?=
+Date: Mon, 14 Apr 2025 15:00:00 +0200
+Message-ID: <test-mixed-rfc2047@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+This message has RFC 2047 encoded-words mixing UTF-8 and ISO-8859-1
+in both From and Subject headers.
