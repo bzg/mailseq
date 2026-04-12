@@ -1,4 +1,4 @@
-#+title: mailseq: Clojure lib for reading and parsing mailboxes
+#+title: mailseq: Clojure lib for reading mailboxes
 
 [[https://clojars.org/org.clojars.bzg/mailseq][https://img.shields.io/clojars/v/org.clojars.bzg/mailseq.svg]]
 
