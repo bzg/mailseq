@@ -50,7 +50,7 @@ Both backends return the same message map structure:
  :from           [{:name "Alice" :address "alice@example.com"}]
  :to             [{:name "Bob" :address "bob@example.com"}]
  :cc             []
- :bcc            nil
+ :bcc            nil                  ;; only populated in Maildir Sent/ with some clients
  :reply-to       [{:name "Alice" :address "alice@example.com"}]
  :subject        "Hello from mailseq"
  :date-sent      #inst "2025-02-15T10:30:00.000-00:00"
@@ -142,8 +142,7 @@ For use cases where you process messages once and want to skip
 already-seen messages on subsequent runs (e.g. a batch indexer):
 
 #+begin_src clojure
-;; Step 1: get all ids (cheap — no file content is read for Maildir,
-;;         only UIDs are fetched for IMAP)
+;; Step 1: get all ids (no file is read for Maildir, only UIDs for IMAP)
 (def all-ids (mailseq/list-ids src "INBOX"))
 
 ;; Step 2: diff against your own persistence
@@ -250,7 +249,7 @@ Maildir is safe for concurrent reads.
 #+begin_src clojure
 (require '[mailseq.maildir.watch :as watch])
 
-;; Async — returns a Thread, call .interrupt to stop
+;; Async, returns a Thread, call .interrupt to stop
 (def watcher
   (watch/watch-async "/home/me/Mail"
     (fn [msg]
@@ -261,26 +260,18 @@ Maildir is safe for concurrent reads.
 (.interrupt watcher)
 #+end_src
 
-Uses =java.nio.file.WatchService= (inotify on Linux, kqueue on
-macOS). Existing messages at startup are recorded as seen — only
-truly new files trigger the callback. A set of seen stable ids
-prevents processing the same message twice when a MUA moves a file
-from =new/= to =cur/=.
+Uses =java.nio.file.WatchService= (inotify on GNU/Linux, kqueue on
+macOS). Existing messages at startup are recorded as seen - only truly
+new files trigger the callback. A set of seen stable ids prevents
+processing the same message twice when a MUA moves a file from =new/= to
+=cur/=.
 
 * Design principles
 
-- *Read-only* -- no sending, writing, moving, or deleting. The
-  =MailSource= protocol has no mutating methods; adding one requires
-  modifying the protocol itself.
-- *Data-oriented* -- all inputs and outputs are plain Clojure maps.
-- *Explicit folders* -- no server/filesystem discovery. You list
-  exactly which folders to read in your config.
-- *Identical results across backends* -- the same =.eml= file read
-  through IMAP and Maildir produces the same Clojure map (modulo
-  =:uid=, =:id=, =:date-received=). Enforced by cross-backend tests.
-- *Minimal filtering* -- only date range and limit. No substring
-  search (inconsistent across IMAP servers).
-- *Zero extra dependencies* -- only Eclipse Angus Mail.
+- *Read-only*: No sending, writing, moving, or deleting.
+- *Data-oriented*: All outputs are plain Clojure maps.
+- *Minimal filtering*: Only date range and limit.
+- *Explicit folders*: No server/filesystem discovery.
 
 * Building & deploying
 
@@ -305,8 +296,7 @@ clj -T:build deploy
 - Send a [[mailto:~bzg/dev@lists.sr.ht][feature request]] with =[FR] mailseq: <FEATURE REQUEST>=
 - Share any [[mailto:~bzg/dev@lists.sr.ht][other question or idea]]
 
-You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work
-on [[https://liberapay.com/bzg/][liberapay]].
+You can also [[mailto:bzg@bzg.fr][send me an email]] and support my work on [[https://liberapay.com/bzg/][liberapay]].
 
 * Support the Clojure(script) ecosystem
 
