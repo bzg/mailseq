@@ -11,13 +11,13 @@ is returned as a plain Clojure map.
 deps.edn:
 
 #+begin_src clojure
-org.clojars.bzg/mailseq {:mvn/version "0.0.1"}
+org.clojars.bzg/mailseq {:mvn/version "0.0.2"}
 #+end_src
 
 Leiningen:
 
 #+begin_src clojure
-[org.clojars.bzg/mailseq "0.0.1"]
+[org.clojars.bzg/mailseq "0.0.2"]
 #+end_src
 
 * Quick start
