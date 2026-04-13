@@ -305,3 +305,11 @@
 
        headers?
        (assoc :headers (or (safe #(get-all-headers mime-msg)) {}))))))
+
+(defn assoc-imap-id
+  "Add the stable `:id` key to an IMAP message map.  The IMAP backend's
+  stable id is the UID as a string.  No-op when `:uid` is absent."
+  [m]
+  (if-let [uid (:uid m)]
+    (assoc m :id (str uid))
+    m))

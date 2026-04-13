@@ -67,16 +67,6 @@
       (java.util.Arrays/copyOfRange msgs start (alength msgs)))
     msgs))
 
-(defn- assoc-stable-id
-  "The IMAP backend's stable `:id` is the UID as a string. Derived
-  here so that a parsed IMAP message map is self-sufficient and
-  conforms to the common message-map contract without further
-  post-processing by the public API layer."
-  [m]
-  (if-let [uid (:uid m)]
-    (assoc m :id (str uid))
-    m))
-
 (defn- fetch-and-parse
   "Fetch messages from a folder, apply FetchProfile, and parse.
   Messages that fail to parse are logged and skipped."
@@ -86,7 +76,7 @@
     (into []
           (keep (fn [msg]
                   (try
-                    (assoc-stable-id (parse/message->map msg parse-opts))
+                    (parse/assoc-imap-id (parse/message->map msg parse-opts))
                     (catch Exception e
                       (log/warn "Skipping message"
                                 (.getMessageNumber msg)

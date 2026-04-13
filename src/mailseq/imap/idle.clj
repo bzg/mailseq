@@ -25,7 +25,7 @@
       (let [msgs (.getMessages ^MessageCountEvent event)]
         (doseq [msg msgs]
           (try
-            (on-added (parse/message->map msg parse-opts))
+            (on-added (parse/assoc-imap-id (parse/message->map msg parse-opts)))
             (catch Exception e
               (log/error e "Error processing new message"))))))
     (messagesRemoved [_ _event]
