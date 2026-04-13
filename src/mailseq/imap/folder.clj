@@ -48,26 +48,28 @@
   (when (.isOpen folder)
     (.close folder false)))
 
+(defn- with-temp-folder*
+  "Open `folder-name` read-only for the duration of `f`, then close it.
+  If the folder was already open, leaves it open."
+  [{:keys [^Store store]} ^String folder-name f]
+  (let [folder  (.getFolder store folder-name)
+        opened? (not (.isOpen folder))]
+    (try
+      (when opened?
+        (.open folder Folder/READ_ONLY))
+      (f folder)
+      (finally
+        (when (and opened? (.isOpen folder))
+          (.close folder false))))))
+
 (defn message-count
   "Return the number of messages in the named folder."
-  [{:keys [^Store store]} ^String folder-name]
-  (let [folder (.getFolder store folder-name)]
-    (try
-      (when-not (.isOpen folder)
-        (.open folder Folder/READ_ONLY))
-      (.getMessageCount folder)
-      (finally
-        (when (.isOpen folder)
-          (.close folder false))))))
+  [conn folder-name]
+  (with-temp-folder* conn folder-name
+    (fn [^Folder f] (.getMessageCount f))))
 
 (defn unread-count
   "Return the number of unread messages in the named folder."
-  [{:keys [^Store store]} ^String folder-name]
-  (let [folder (.getFolder store folder-name)]
-    (try
-      (when-not (.isOpen folder)
-        (.open folder Folder/READ_ONLY))
-      (.getUnreadMessageCount folder)
-      (finally
-        (when (.isOpen folder)
-          (.close folder false))))))
+  [conn folder-name]
+  (with-temp-folder* conn folder-name
+    (fn [^Folder f] (.getUnreadMessageCount f))))

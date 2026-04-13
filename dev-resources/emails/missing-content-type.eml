@@ -1,0 +1,8 @@
+Message-ID: <test-malformed-notype@example.com>
+From: sender@example.com
+To: recipient@example.com
+Subject: No Content-Type header
+Date: Mon, 20 Jan 2025 10:00:00 +0000
+
+This message has no Content-Type header at all.
+The parser should default to text/plain.

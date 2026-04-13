@@ -85,6 +85,19 @@
 
 (def ^:dynamic *imap-port* nil)
 
+(defn- imap-cfg
+  "Build an IMAP config map for the test GreenMail server."
+  ([] (imap-cfg {}))
+  ([extra]
+   (merge {:type     :imap
+           :host     "localhost"
+           :port     *imap-port*
+           :ssl      false
+           :user     imap-user
+           :password imap-pass
+           :folders  {"INBOX" "INBOX"}}
+          extra)))
+
 (defn- deliver-fixture! [^GreenMailUser user ^Session sess ^java.io.File f]
   (let [bytes (Files/readAllBytes (.toPath f))
         msg   (MimeMessage. sess (ByteArrayInputStream. bytes))]
@@ -132,13 +145,7 @@
 
 (deftest imap-and-maildir-agree-on-message-map
   (let [maildir-path (make-maildir-fixture)]
-    (mailseq/with-source [imap-src {:type :imap
-                                    :host "localhost"
-                                    :port *imap-port*
-                                    :ssl false
-                                    :user imap-user
-                                    :password imap-pass
-                                    :folders {"INBOX" "INBOX"}}]
+    (mailseq/with-source [imap-src (imap-cfg)]
       (mailseq/with-source [md-src {:type :maildir
                                     :folders {"INBOX" maildir-path}}]
         (let [imap-by-id (index-by-message-id (mailseq/messages imap-src "INBOX"))
@@ -171,13 +178,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest by-id-returns-single-message-imap
-  (mailseq/with-source [src {:type :imap
-                             :host "localhost"
-                             :port *imap-port*
-                             :ssl false
-                             :user imap-user
-                             :password imap-pass
-                             :folders {"INBOX" "INBOX"}}]
+  (mailseq/with-source [src (imap-cfg)]
     (let [all (mailseq/messages src "INBOX")
           one (first all)
           id  (:id one)
@@ -196,13 +197,7 @@
 
 (deftest date-filters-applied-identically-on-both-backends
   (let [maildir-path (make-maildir-fixture)]
-    (mailseq/with-source [imap-src {:type :imap
-                                    :host "localhost"
-                                    :port *imap-port*
-                                    :ssl false
-                                    :user imap-user
-                                    :password imap-pass
-                                    :folders {"INBOX" "INBOX"}}]
+    (mailseq/with-source [imap-src (imap-cfg)]
       (mailseq/with-source [md-src {:type :maildir
                                     :folders {"INBOX" maildir-path}}]
         (doseq [opts [{}
@@ -216,13 +211,7 @@
 
 (deftest full-text-keys-rejected-on-both-backends
   (let [maildir-path (make-maildir-fixture)]
-    (mailseq/with-source [imap-src {:type :imap
-                                    :host "localhost"
-                                    :port *imap-port*
-                                    :ssl false
-                                    :user imap-user
-                                    :password imap-pass
-                                    :folders {"INBOX" "INBOX"}}]
+    (mailseq/with-source [imap-src (imap-cfg)]
       (mailseq/with-source [md-src {:type :maildir
                                     :folders {"INBOX" maildir-path}}]
         (doseq [src [imap-src md-src]
@@ -232,25 +221,13 @@
                                   (mailseq/messages src "INBOX" {k "x"})))))))))
 
 (deftest imap-rejects-unknown-options
-  (mailseq/with-source [src {:type :imap
-                             :host "localhost"
-                             :port *imap-port*
-                             :ssl false
-                             :user imap-user
-                             :password imap-pass
-                             :folders {"INBOX" "INBOX"}}]
+  (mailseq/with-source [src (imap-cfg)]
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported"
                           (mailseq/messages src "INBOX" {:bogus 1})))))
 
 (deftest raw-is-imap-only
   (testing "raw? is accepted on IMAP"
-    (mailseq/with-source [src {:type :imap
-                               :host "localhost"
-                               :port *imap-port*
-                               :ssl false
-                               :user imap-user
-                               :password imap-pass
-                               :folders {"INBOX" "INBOX"}}]
+    (mailseq/with-source [src (imap-cfg)]
       (let [raw (mailseq/messages src "INBOX" {:raw? true})]
         (is (every? #(instance? jakarta.mail.Message %) raw)))))
   (testing "raw? is rejected on Maildir"
@@ -277,13 +254,7 @@
 
 (deftest list-ids-on-both-backends
   (let [maildir-path (make-maildir-fixture)]
-    (mailseq/with-source [imap-src {:type :imap
-                                    :host "localhost"
-                                    :port *imap-port*
-                                    :ssl false
-                                    :user imap-user
-                                    :password imap-pass
-                                    :folders {"INBOX" "INBOX"}}]
+    (mailseq/with-source [imap-src (imap-cfg)]
       (mailseq/with-source [md-src {:type :maildir
                                     :folders {"INBOX" maildir-path}}]
         (let [imap-ids (mailseq/list-ids imap-src "INBOX")
@@ -297,13 +268,7 @@
 
 (deftest by-ids-batch-on-both-backends
   (let [maildir-path (make-maildir-fixture)]
-    (mailseq/with-source [imap-src {:type :imap
-                                    :host "localhost"
-                                    :port *imap-port*
-                                    :ssl false
-                                    :user imap-user
-                                    :password imap-pass
-                                    :folders {"INBOX" "INBOX"}}]
+    (mailseq/with-source [imap-src (imap-cfg)]
       (mailseq/with-source [md-src {:type :maildir
                                     :folders {"INBOX" maildir-path}}]
         (doseq [[label src] [["IMAP" imap-src] ["Maildir" md-src]]]
@@ -324,11 +289,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- make-imap-conn []
-  (imap-connect/connect {:host "localhost"
-                         :port *imap-port*
-                         :ssl false
-                         :user imap-user
-                         :password imap-pass}))
+  (imap-connect/connect (dissoc (imap-cfg) :type :folders)))
 
 (deftest by-uid-range-fetches-subset
   (let [conn (make-imap-conn)]
@@ -401,13 +362,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest by-id-range-on-imap
-  (mailseq/with-source [src {:type :imap
-                             :host "localhost"
-                             :port *imap-port*
-                             :ssl false
-                             :user imap-user
-                             :password imap-pass
-                             :folders {"INBOX" "INBOX"}}]
+  (mailseq/with-source [src (imap-cfg)]
     (let [all-ids (mailseq/list-ids src "INBOX")
           sorted  (sort all-ids)]
       (testing "full range returns all messages"
@@ -442,13 +397,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest underlying-conn-imap
-  (mailseq/with-source [src {:type :imap
-                             :host "localhost"
-                             :port *imap-port*
-                             :ssl false
-                             :user imap-user
-                             :password imap-pass
-                             :folders {"INBOX" "INBOX"}}]
+  (mailseq/with-source [src (imap-cfg)]
     (let [conn (mailseq/underlying-conn src)]
       (testing "returns a connection map for IMAP"
         (is (some? conn))
@@ -468,13 +417,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest watch-async-imap-starts-and-stops
-  (mailseq/with-source [src {:type :imap
-                             :host "localhost"
-                             :port *imap-port*
-                             :ssl false
-                             :user imap-user
-                             :password imap-pass
-                             :folders {"INBOX" "INBOX"}}]
+  (mailseq/with-source [src (imap-cfg)]
     (let [thread (mailseq/watch-async src "INBOX"
                                       (fn [_])
                                       {:heartbeat-ms 500})]
@@ -490,8 +433,51 @@
           (when (.isAlive thread) (.interrupt thread)))))))
 
 ;; ---------------------------------------------------------------------------
-;; Closed source throws
+;; IMAP IDLE: verify that watch-async receives a newly delivered message
 ;; ---------------------------------------------------------------------------
+
+(deftest idle-async-receives-new-message
+  (let [gm-setup (ServerSetup. 0 "127.0.0.1" "imap")
+        gm       (doto (GreenMail. (into-array ServerSetup [gm-setup])) .start)]
+    (try
+      (let [user (.createUser (.getUserManager gm) imap-user imap-user imap-pass)
+            sess (Session/getInstance (Properties.))
+            port (.. gm getImap getServerSetup getPort)
+            ;; Deliver one message so INBOX exists
+            _    (deliver-fixture! user sess (io/file "dev-resources/emails/plain-text.eml"))
+            received (promise)
+            conn (imap-connect/connect (dissoc (imap-cfg {:port port}) :type :folders))
+            thread (imap-idle/idle-async conn "INBOX"
+                                        (fn [m] (deliver received m))
+                                        {:heartbeat-ms 500})]
+        (try
+          (Thread/sleep 300)
+          ;; Deliver a second message while IDLE is watching
+          (deliver-fixture! user sess (io/file "dev-resources/emails/simple-multipart.eml"))
+          (let [msg (deref received 8000 :timeout)]
+            (testing "IDLE callback received a message"
+              (is (not= :timeout msg) "on-message should have been called"))
+            (when (not= :timeout msg)
+              (testing "received message has :id"
+                (is (some? (:id msg))))
+              (testing "received message has :message-id"
+                (is (some? (:message-id msg))))))
+          (finally
+            (.interrupt thread)
+            (.join thread 5000)
+            (imap-connect/disconnect conn))))
+      (finally
+        (.stop gm)))))
+
+;; ---------------------------------------------------------------------------
+;; OAuth2: invalid token fails gracefully
+;; ---------------------------------------------------------------------------
+
+(deftest oauth2-invalid-token-fails-gracefully
+  (is (thrown? Exception
+              (imap-connect/connect
+               (dissoc (imap-cfg {:password nil :oauth2-token "invalid-token-xyz"})
+                       :type :folders)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Encoding fixtures: content survives parsing on both backends
@@ -499,13 +485,7 @@
 
 (deftest encoding-fixtures-parsed-correctly
   (let [maildir-path (make-maildir-fixture)]
-    (mailseq/with-source [imap-src {:type :imap
-                                    :host "localhost"
-                                    :port *imap-port*
-                                    :ssl false
-                                    :user imap-user
-                                    :password imap-pass
-                                    :folders {"INBOX" "INBOX"}}]
+    (mailseq/with-source [imap-src (imap-cfg)]
       (mailseq/with-source [md-src {:type :maildir
                                     :folders {"INBOX" maildir-path}}]
         (let [imap-by-id (index-by-message-id (mailseq/messages imap-src "INBOX"))
@@ -559,13 +539,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest closed-imap-source-throws
-  (let [src (mailseq/open {:type :imap
-                           :host "localhost"
-                           :port *imap-port*
-                           :ssl false
-                           :user imap-user
-                           :password imap-pass
-                           :folders {"INBOX" "INBOX"}})]
+  (let [src (mailseq/open (imap-cfg))]
     (mailseq/close src)
     (testing "messages after close"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"closed"

@@ -99,3 +99,40 @@
       (is (map? (:headers m)))
       (is (some? (get (:headers m) "Message-ID")))
       (is (some? (get (:headers m) "From"))))))
+
+;; ---------------------------------------------------------------------------
+;; Malformed / edge-case messages
+;; ---------------------------------------------------------------------------
+
+(deftest parse-missing-content-type
+  (let [msg (load-eml "emails/missing-content-type.eml")
+        m   (parse/message->map msg)]
+    (is (= "<test-malformed-notype@example.com>" (:message-id m)))
+    (is (= "No Content-Type header" (:subject m)))
+    (is (some? (get-in m [:body :text])))))
+
+(deftest parse-truncated-multipart
+  (let [msg (load-eml "emails/truncated-multipart.eml")
+        m   (parse/message->map msg)]
+    (is (= "<test-malformed-truncated@example.com>" (:message-id m)))
+    (is (= "Truncated multipart" (:subject m)))
+    (is (some? (get-in m [:body :text])))))
+
+(deftest parse-empty-body
+  (let [msg (load-eml "emails/empty-body.eml")
+        m   (parse/message->map msg)]
+    (is (= "<test-malformed-empty@example.com>" (:message-id m)))
+    (is (= "Empty body" (:subject m)))))
+
+(deftest parse-bad-date
+  (let [msg (load-eml "emails/bad-date.eml")
+        m   (parse/message->map msg)]
+    (is (= "<test-malformed-baddate@example.com>" (:message-id m)))
+    (is (= "Invalid date header" (:subject m)))
+    (is (some? (get-in m [:body :text])))))
+
+(deftest parse-minimal-headers
+  (let [msg (load-eml "emails/minimal-headers.eml")
+        m   (parse/message->map msg)]
+    (is (= "Minimal" (:subject m)))
+    (is (some? (get-in m [:body :text])))))

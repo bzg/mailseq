@@ -6,25 +6,15 @@
   "Integration test for the Maildir filesystem watch."
   (:require [clojure.test :refer [deftest testing is]]
             [clojure.java.io :as io]
-            [mailseq.maildir.watch :as watch])
-  (:import [java.nio.file Files]
-           [java.nio.file.attribute FileAttribute]))
+            [mailseq :as mailseq]
+            [mailseq.maildir.watch :as watch]
+            [mailseq.test-util :as tu]))
 
 (def ^:private fixture-eml
   (io/file "dev-resources/emails/plain-text.eml"))
 
-(defn- make-empty-maildir
-  "Create a temporary, empty Maildir directory with cur/ and new/."
-  ^String []
-  (let [root (Files/createTempDirectory
-              "mailseq-watch-"
-              (into-array FileAttribute []))]
-    (.mkdirs (io/file (.toFile root) "cur"))
-    (.mkdirs (io/file (.toFile root) "new"))
-    (.getAbsolutePath (.toFile root))))
-
 (deftest watch-detects-new-message
-  (let [maildir-path (make-empty-maildir)
+  (let [maildir-path (tu/make-empty-maildir "mailseq-watch-")
         received     (promise)
         watcher      (watch/watch-async
                       maildir-path
@@ -47,7 +37,7 @@
         (.interrupt watcher)))))
 
 (deftest watch-ignores-existing-messages
-  (let [maildir-path (make-empty-maildir)
+  (let [maildir-path (tu/make-empty-maildir "mailseq-watch-")
         ;; Pre-populate cur/ before starting the watch
         _            (io/copy fixture-eml
                               (io/file maildir-path "cur" "1700000001.M1.host:2,S"))
@@ -63,8 +53,29 @@
       (finally
         (.interrupt watcher)))))
 
+(deftest watch-async-unified-api-delivers-id
+  (let [maildir-path (tu/make-empty-maildir "mailseq-watch-")
+        received     (promise)]
+    (mailseq/with-source [src {:type :maildir
+                               :folders {"INBOX" maildir-path}}]
+      (let [thread (mailseq/watch-async src "INBOX"
+                                        (fn [msg] (deliver received msg))
+                                        {:settle-ms 20})]
+        (try
+          (Thread/sleep 200)
+          (io/copy fixture-eml
+                   (io/file maildir-path "new" "1700099998.M9.host"))
+          (let [msg (deref received 5000 :timeout)]
+            (is (not= :timeout msg) "on-message should have been called")
+            (when (not= :timeout msg)
+              (is (string? (:id msg)))
+              (is (seq (:id msg)))
+              (is (= "<test-002@example.com>" (:message-id msg)))))
+          (finally
+            (.interrupt thread)))))))
+
 (deftest watch-deduplicates-across-new-and-cur
-  (let [maildir-path (make-empty-maildir)
+  (let [maildir-path (tu/make-empty-maildir "mailseq-watch-")
         call-count   (atom 0)
         watcher      (watch/watch-async
                       maildir-path

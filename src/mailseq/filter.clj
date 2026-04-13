@@ -39,7 +39,7 @@
   backend. Backend-specific extras (e.g. the IMAP-only `:raw?`) are
   not part of this set and must be whitelisted at the call site via
   the 2-arity of `validate-opts`."
-  (into #{} (concat match-keys parse-keys shape-keys)))
+  (clojure.set/union match-keys parse-keys shape-keys))
 
 (defn validate-opts
   "Throw ex-info if `opts` contains any key outside the common contract.

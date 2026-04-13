@@ -1,0 +1,7 @@
+Message-ID: <test-malformed-empty@example.com>
+From: sender@example.com
+To: recipient@example.com
+Subject: Empty body
+Date: Mon, 20 Jan 2025 10:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+

@@ -8,7 +8,8 @@
   (:require [clojure.test :refer [deftest testing is]]
             [clojure.java.io :as io]
             [mailseq :as mailseq]
-            [mailseq.maildir :as maildir]))
+            [mailseq.maildir :as maildir]
+            [mailseq.test-util :as tu]))
 
 (def ^:private fixture-path
   (.getAbsolutePath (io/file "dev-resources/maildir/inbox")))
@@ -140,3 +141,69 @@
 (deftest unsupported-type
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported source type"
                         (mailseq/open {:type :pop3}))))
+
+;; ---------------------------------------------------------------------------
+;; Incremental fetch: list-ids → add files → list-ids → by-ids
+;; ---------------------------------------------------------------------------
+
+(defn- make-temp-maildir
+  "Create a throwaway Maildir with one pre-existing message in cur/."
+  ^String []
+  (let [path (tu/make-empty-maildir "mailseq-incr-")]
+    (io/copy (io/file "dev-resources/emails/plain-text.eml")
+             (io/file path "cur" "1700000001.M1.host:2,S"))
+    path))
+
+(deftest incremental-fetch-via-list-ids-and-by-ids
+  (let [path     (make-temp-maildir)
+        ids-v1   (set (maildir/list-ids path))
+        _        (do (io/copy (io/file "dev-resources/emails/simple-multipart.eml")
+                              (io/file path "new" "1700000002.M2.host"))
+                     (io/copy (io/file "dev-resources/emails/with-attachment.eml")
+                              (io/file path "new" "1700000003.M3.host")))
+        ids-v2   (set (maildir/list-ids path))
+        new-ids  (clojure.set/difference ids-v2 ids-v1)]
+    (testing "diff detects exactly the two new messages"
+      (is (= 2 (count new-ids))))
+    (testing "by-ids on new-ids returns the right messages"
+      (let [msgs (maildir/by-ids path new-ids {})]
+        (is (= 2 (count msgs)))
+        (is (= new-ids (set (map :id msgs))))
+        (is (every? :id msgs))
+        (is (every? :message-id msgs))))))
+
+;; ---------------------------------------------------------------------------
+;; by-id-range: lexicographic ordering on Maildir
+;; ---------------------------------------------------------------------------
+
+(defn- make-maildir-with-varied-ids
+  "Create a Maildir with filenames that have varied timestamp prefixes
+  to exercise lexicographic filtering in by-id-range."
+  ^String []
+  (let [path (tu/make-empty-maildir "mailseq-range-")
+        eml  (io/file "dev-resources/emails/plain-text.eml")]
+    (doseq [name ["100.M1.host:2,S"
+                  "1700000001.M2.host:2,S"
+                  "1700000050.M3.host:2,S"
+                  "1700000100.M4.host:2,S"
+                  "9999999999.M5.host:2,S"]]
+      (io/copy eml (io/file path "cur" name)))
+    path))
+
+(deftest by-id-range-lexicographic-on-maildir
+  (let [path    (make-maildir-with-varied-ids)
+        all-ids (sort (maildir/list-ids path))]
+    (testing "full range returns all messages"
+      (mailseq/with-source [src {:type :maildir :folders {"INBOX" path}}]
+        (let [msgs (mailseq/by-id-range src "INBOX" (first all-ids) (last all-ids))]
+          (is (= 5 (count msgs))))))
+    (testing "range from mid-point excludes earlier ids"
+      (mailseq/with-source [src {:type :maildir :folders {"INBOX" path}}]
+        (let [msgs (mailseq/by-id-range src "INBOX" "1700000050.M3.host" nil)]
+          (is (every? #(>= (compare (:id %) "1700000050.M3.host") 0) msgs))
+          (is (pos? (count msgs))))))
+    (testing "short numeric prefix sorts before long ones (lexicographic)"
+      (mailseq/with-source [src {:type :maildir :folders {"INBOX" path}}]
+        (let [msgs (mailseq/by-id-range src "INBOX" "100.M1.host" "1700000001.M2.host")]
+          (is (= #{"100.M1.host" "1700000001.M2.host"}
+                 (set (map :id msgs)))))))))
