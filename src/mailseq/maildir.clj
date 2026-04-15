@@ -252,20 +252,24 @@
         _     (validate-maildir! dir)
         files (maildir-children dir)]
     (if (or (:since opts) (:before opts))
-      ;; Two-pass: envelope-only filter, then full parse on survivors
+      ;; Two-pass: envelope-only filter, then full parse on survivors.
+      ;; Both passes are parallelised: envelope and full-parse reads
+      ;; are I/O-bound, and `pmap` saturates the disk queue on SSDs
+      ;; while falling back to near-sequential cost on small Maildirs.
       (let [since-ms  (some-> (:since opts) flt/->date .getTime)
             candidates (cond->> files
                          since-ms (remove #(filename-definitely-before? % since-ms)))
-            envelopes (into [] (keep file->envelope) candidates)
+            envelopes (into [] (keep identity) (pmap file->envelope candidates))
             filtered  (filterv #(flt/matches? % opts) envelopes)
             sorted    (sort-for-limit filtered)
             limited   (if-let [limit (:limit opts)]
                         (subvec sorted (max 0 (- (count sorted) limit)))
                         sorted)
             p-opts    (flt/parse-opts opts)]
-        (into [] (keep #(envelope->map % p-opts)) limited))
-      ;; No date filter: single pass
-      (let [parsed (into [] (keep #(file->map % (flt/parse-opts opts))) files)
+        (into [] (keep identity) (pmap #(envelope->map % p-opts) limited)))
+      ;; No date filter: single pass, parallelised for the same reason.
+      (let [p-opts (flt/parse-opts opts)
+            parsed (into [] (keep identity) (pmap #(file->map % p-opts) files))
             sorted (sort-for-limit parsed)]
         (flt/apply-opts sorted opts)))))
 
@@ -297,18 +301,17 @@
 (defn by-ids
   "Return a vector of message maps for every message whose stable id
   is in `ids` (a set of strings). A single scan of `cur/` + `new/`
-  reads only the matching files.
+  reads only the matching files, in parallel.
 
   Typical use: call `list-ids` to get all ids, diff against a set of
   already-seen ids, then call `by-ids` with the remainder."
   [^String path ids opts]
   (flt/validate-opts opts)
-  (let [dir    (io/file path)
-        _      (validate-maildir! dir)
-        id-set (if (set? ids) ids (set ids))
-        p-opts (flt/parse-opts opts)]
-    (into []
-          (keep (fn [^File f]
-                  (when (contains? id-set (stable-id (.getName f)))
-                    (file->map f p-opts))))
-          (maildir-children dir))))
+  (let [dir      (io/file path)
+        _        (validate-maildir! dir)
+        id-set   (if (set? ids) ids (set ids))
+        p-opts   (flt/parse-opts opts)
+        matching (filter (fn [^File f]
+                           (contains? id-set (stable-id (.getName f))))
+                         (maildir-children dir))]
+    (into [] (keep identity) (pmap #(file->map % p-opts) matching))))
