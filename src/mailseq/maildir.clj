@@ -103,38 +103,59 @@
   ^bytes [^File f]
   (Files/readAllBytes (.toPath f)))
 
+(def ^:private header-read-cap
+  "Maximum bytes read from a message file during the envelope pass.
+  RFC 5322 headers are typically a few KB; the cap is a safety net for
+  pathological cases (giant X-headers). If no header/body separator is
+  found within this limit, whatever was read is still handed to
+  `MimeMessage` — `.getSentDate` only needs the `Date:` header."
+  65536)
+
+(defn- read-headers-bytes
+  "Read bytes from `f` up to and including the first RFC 5322
+  header/body separator (CRLF CRLF or LF LF), capped at
+  `header-read-cap`. Used during the envelope pass to avoid loading
+  full message bodies (and their attachments) when only the `Date:`
+  header matters."
+  ^bytes [^File f]
+  (let [out (java.io.ByteArrayOutputStream.)]
+    (with-open [in (java.io.BufferedInputStream.
+                    (java.io.FileInputStream. f))]
+      (loop [prev1 -1 prev2 -1 prev3 -1 total 0]
+        (if (>= total header-read-cap)
+          (.toByteArray out)
+          (let [b (.read in)]
+            (if (neg? b)
+              (.toByteArray out)
+              (do (.write out b)
+                  (cond
+                    ;; LF LF (bare LF line endings)
+                    (and (= b 0x0A) (= prev1 0x0A))
+                    (.toByteArray out)
+
+                    ;; CRLF CRLF (standard RFC 5322)
+                    (and (= b 0x0A) (= prev1 0x0D)
+                         (= prev2 0x0A) (= prev3 0x0D))
+                    (.toByteArray out)
+
+                    :else
+                    (recur b prev1 prev2 (inc total)))))))))))
+
 (defn- file->envelope
-  "Read one Maildir file, returning a lightweight map with just enough
-  info for date filtering: `:file`, `:bytes`, `:date-sent`, `:fname`.
+  "Read just enough of `f` to extract `:date-sent` for date filtering.
+  Does NOT retain the file bytes: pass 2 (`envelope->map`) re-reads
+  the file for survivors only. This keeps memory bounded when scanning
+  a large Maildir with a narrow `:since` window.
   Returns nil if the file cannot be read."
   [^File f]
   (try
-    (let [bytes (read-bytes f)
+    (let [bytes (read-headers-bytes f)
           msg   (MimeMessage. ^Session @shared-session (ByteArrayInputStream. bytes))]
-      {:file f :bytes bytes :date-sent (.getSentDate msg) :fname (.getName f)})
+      {:file f :date-sent (.getSentDate msg) :fname (.getName f)})
     (catch Exception e
       (log/warn "Skipping Maildir file"
                 (.getAbsolutePath f)
                 "- failed to read:" (.getMessage e))
-      nil)))
-
-(defn- envelope->map
-  "Full-parse a message from retained bytes + file metadata."
-  [{:keys [^File file ^bytes bytes fname]} parse-opts]
-  (try
-    (let [msg    (MimeMessage. ^Session @shared-session (ByteArrayInputStream. bytes))
-          parsed (parse/message->map msg parse-opts)
-          flags  (parse-flags fname)]
-      (-> parsed
-          (assoc :id            (stable-id fname)
-                 :flags         flags
-                 :date-received (Date. (.lastModified file))
-                 :uid           nil)
-          (dissoc :message-number)))
-    (catch Exception e
-      (log/warn "Skipping Maildir file"
-                (.getAbsolutePath file)
-                "- failed to parse:" (.getMessage e))
       nil)))
 
 (defn ^:no-doc file->map
@@ -143,8 +164,29 @@
   Returns nil and logs a warning if the file cannot be read or parsed.
   Also used by `mailseq.maildir.watch`."
   [^File f parse-opts]
-  (when-let [env (file->envelope f)]
-    (envelope->map env parse-opts)))
+  (try
+    (let [bytes  (read-bytes f)
+          msg    (MimeMessage. ^Session @shared-session (ByteArrayInputStream. bytes))
+          parsed (parse/message->map msg parse-opts)
+          fname  (.getName f)
+          flags  (parse-flags fname)]
+      (-> parsed
+          (assoc :id            (stable-id fname)
+                 :flags         flags
+                 :date-received (Date. (.lastModified f))
+                 :uid           nil)
+          (dissoc :message-number)))
+    (catch Exception e
+      (log/warn "Skipping Maildir file"
+                (.getAbsolutePath f)
+                "- failed to parse:" (.getMessage e))
+      nil)))
+
+(defn- envelope->map
+  "Full-parse the survivor message by re-reading the file from disk.
+  Called in pass 2 after envelope filtering."
+  [{:keys [^File file]} parse-opts]
+  (file->map file parse-opts))
 
 ;; ---------------------------------------------------------------------------
 ;; Public operations (called by the MaildirSource record in `mailseq`)

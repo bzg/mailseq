@@ -69,6 +69,29 @@
       (is (= 1 (count msgs)))
       (is (= "<test-002@example.com>" (:message-id (first msgs)))))))
 
+(deftest filters-date-range-with-large-body
+  (testing "date filter survives a message whose body exceeds header-read-cap"
+    ;; Write a synthetic Maildir message with small headers + huge body.
+    ;; The envelope pass should read only up to the header/body separator
+    ;; and still extract Date: for filtering; pass 2 re-reads the full
+    ;; file for survivors.
+    (let [path  (tu/make-empty-maildir "mailseq-big-body-")
+          big   (apply str "Hello " (repeat 100000 "x"))
+          eml   (str "From: sender@example.com\r\n"
+                     "To: rcpt@example.com\r\n"
+                     "Subject: Huge body\r\n"
+                     "Message-ID: <huge-001@example.com>\r\n"
+                     "Date: Wed, 15 Jan 2025 12:00:00 +0000\r\n"
+                     "\r\n"
+                     big)]
+      (spit (io/file path "cur" "1700000099.M1.host:2,S") eml)
+      (let [in-range  (maildir/messages path {:since "2025-01-01" :before "2025-01-31"})
+            out-range (maildir/messages path {:since "2024-01-01" :before "2024-12-31"})]
+        (is (= 1 (count in-range)))
+        (is (= "<huge-001@example.com>" (:message-id (first in-range))))
+        (is (= "Huge body" (:subject (first in-range))))
+        (is (zero? (count out-range)))))))
+
 (deftest limit-keeps-most-recent
   (let [msgs (maildir/messages fixture-path {:limit 1})]
     (is (= 1 (count msgs)))
