@@ -141,6 +141,36 @@
                     :else
                     (recur b prev1 prev2 (inc total)))))))))))
 
+(defn- filename-unix-seconds
+  "Parse the leading Unix-seconds timestamp from a Maildir filename.
+  Standard filenames look like `<seconds>.<unique>.<host>[:<info>]`
+  (see https://cr.yp.to/proto/maildir.html). Returns nil when the
+  prefix is absent or unparseable — those files fall through to the
+  envelope read rather than being wrongly skipped."
+  [^String fname]
+  (let [idx (.indexOf fname ".")]
+    (when (pos? idx)
+      (try
+        (Long/parseLong (.substring fname 0 idx))
+        (catch NumberFormatException _ nil)))))
+
+(def ^:private filename-ts-slack-ms
+  "Tolerance applied to the filename timestamp pre-filter. One day
+  covers clock skew, slow delivery, and mild reshuffling during mail
+  imports. Pass 2 always re-validates against the real `Date:` header
+  so this is only a pruning heuristic — not a correctness gate."
+  (* 24 60 60 1000))
+
+(defn- filename-definitely-before?
+  "True when the filename's Unix-seconds prefix is conclusively older
+  than `since-ms` (plus slack). Under normal delivery semantics the
+  filename timestamp >= `Date:` header, so a filename older than the
+  window implies the message is older too and can be skipped without
+  opening the file."
+  [^File f since-ms]
+  (when-let [ts (filename-unix-seconds (.getName f))]
+    (< (+ (* ts 1000) filename-ts-slack-ms) since-ms)))
+
 (defn- file->envelope
   "Read just enough of `f` to extract `:date-sent` for date filtering.
   Does NOT retain the file bytes: pass 2 (`envelope->map`) re-reads
@@ -213,7 +243,9 @@
   When `:since` or `:before` is present, a two-pass strategy avoids
   full MIME parsing on messages outside the date window: pass 1
   extracts just the `Date:` header (cheap), filters + sorts + limits,
-  then pass 2 does the full `message->map` only on survivors."
+  then pass 2 does the full `message->map` only on survivors.
+  `:since` additionally prunes files whose filename timestamp is
+  older than the window, skipping the envelope read entirely."
   [^String path opts]
   (flt/validate-opts opts)
   (let [dir   (io/file path)
@@ -221,7 +253,10 @@
         files (maildir-children dir)]
     (if (or (:since opts) (:before opts))
       ;; Two-pass: envelope-only filter, then full parse on survivors
-      (let [envelopes (into [] (keep file->envelope) files)
+      (let [since-ms  (some-> (:since opts) flt/->date .getTime)
+            candidates (cond->> files
+                         since-ms (remove #(filename-definitely-before? % since-ms)))
+            envelopes (into [] (keep file->envelope) candidates)
             filtered  (filterv #(flt/matches? % opts) envelopes)
             sorted    (sort-for-limit filtered)
             limited   (if-let [limit (:limit opts)]

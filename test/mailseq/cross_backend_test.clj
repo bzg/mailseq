@@ -131,9 +131,11 @@
         cur  (io/file (.toFile root) "cur")]
     (.mkdirs cur)
     (.mkdirs (io/file (.toFile root) "new"))
+    ;; Filename timestamps post-date every fixture's Date: header (Apr 2025)
+    ;; so the Maildir :since pre-filter never wrongly prunes them.
     (doseq [[i [_ file]] (map-indexed vector fixtures)]
       (io/copy file
-               (io/file cur (format "17000000%02d.M%d.host:2,S" i i))))
+               (io/file cur (format "17500000%02d.M%d.host:2,S" i i))))
     (.getAbsolutePath (.toFile root))))
 
 (defn- index-by-message-id [messages]

@@ -84,7 +84,8 @@
                      "Date: Wed, 15 Jan 2025 12:00:00 +0000\r\n"
                      "\r\n"
                      big)]
-      (spit (io/file path "cur" "1700000099.M1.host:2,S") eml)
+      ;; Filename timestamp matches the Date: header (2025-01-15)
+      (spit (io/file path "cur" "1736942400.M1.host:2,S") eml)
       (let [in-range  (maildir/messages path {:since "2025-01-01" :before "2025-01-31"})
             out-range (maildir/messages path {:since "2024-01-01" :before "2024-12-31"})]
         (is (= 1 (count in-range)))
@@ -100,7 +101,7 @@
 
 (deftest by-id-stable-across-flags
   (testing "Matching by the stable prefix finds the cur/ file even though its filename has a flag suffix"
-    (let [m (maildir/by-id fixture-path "1700000001.M1.host" {})]
+    (let [m (maildir/by-id fixture-path "1736938800.M1.host" {})]
       (is (some? m))
       (is (= "<test-002@example.com>" (:message-id m)))
       (is (contains? (:flags m) :seen))))
@@ -212,6 +213,41 @@
                   "9999999999.M5.host:2,S"]]
       (io/copy eml (io/file path "cur" name)))
     path))
+
+;; ---------------------------------------------------------------------------
+;; :since pre-filter using filename timestamp
+;; ---------------------------------------------------------------------------
+
+(defn- write-eml
+  [path subdir fname date-header]
+  (let [eml (str "From: sender@example.com\r\n"
+                 "To: rcpt@example.com\r\n"
+                 "Subject: " fname "\r\n"
+                 "Message-ID: <" fname "@example.com>\r\n"
+                 "Date: " date-header "\r\n"
+                 "Content-Type: text/plain\r\n"
+                 "\r\n"
+                 "body\r\n")]
+    (spit (io/file path subdir fname) eml)))
+
+(deftest since-prefilter-skips-old-filenames
+  (testing ":since excludes messages whose filename timestamp is well before the window"
+    (let [path (tu/make-empty-maildir "mailseq-prefilter-")]
+      ;; Old: filename 2020-01-01, Date: 2020-01-01
+      (write-eml path "cur" "1577836800.old.host:2,S" "Wed, 01 Jan 2020 00:00:00 +0000")
+      ;; Recent: filename 2025-06-01, Date: 2025-06-01
+      (write-eml path "cur" "1748736000.new.host:2,S" "Sun, 01 Jun 2025 00:00:00 +0000")
+      (let [msgs (maildir/messages path {:since "2025-01-01"})]
+        (is (= 1 (count msgs)))
+        (is (= "1748736000.new.host" (:id (first msgs))))))))
+
+(deftest since-prefilter-falls-through-on-unparseable-filename
+  (testing "filenames without a numeric prefix fall through to the envelope read"
+    (let [path (tu/make-empty-maildir "mailseq-prefilter-fallback-")]
+      ;; No numeric prefix but Date: is in range — must be kept
+      (write-eml path "cur" "weird-name.host:2,S" "Sun, 01 Jun 2025 00:00:00 +0000")
+      (let [msgs (maildir/messages path {:since "2025-01-01"})]
+        (is (= 1 (count msgs)))))))
 
 (deftest by-id-range-lexicographic-on-maildir
   (let [path    (make-maildir-with-varied-ids)
