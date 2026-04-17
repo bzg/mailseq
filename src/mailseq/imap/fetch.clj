@@ -217,6 +217,12 @@
 
   Use UIDFolder/LASTUID as end to fetch from start to the latest message.
 
+  When the range is empty and `start` is greater than the folder's UIDNEXT,
+  emits a warning: that combination almost always means UIDVALIDITY has
+  changed (mailbox recreated, server migration) and the caller is resuming
+  from a stale watermark — every subsequent call will also be empty until
+  the watermark is reset. See `mailseq.imap.folder/uid-validity`.
+
   Example:
     (by-uid-range conn \"INBOX\" 1000 2000)
     (by-uid-range conn \"INBOX\" 1000 UIDFolder/LASTUID)"
@@ -227,6 +233,12 @@
      (let [uid-folder ^UIDFolder folder
            msgs       (.getMessagesByUID uid-folder (long start) (long end))
            valid      (into-array Message (remove nil? msgs))]
+       (when (zero? (alength valid))
+         (let [uid-next (try (.getUIDNext uid-folder) (catch Exception _ -1))]
+           (when (and (pos? uid-next) (> (long start) uid-next))
+             (log/warn "by-uid-range: start UID" start
+                       "exceeds folder UIDNEXT" uid-next
+                       "— UIDVALIDITY likely changed; resume watermark is stale"))))
        (if (:raw? opts)
          (vec valid)
          (fetch-and-parse folder valid (flt/parse-opts opts)))))))

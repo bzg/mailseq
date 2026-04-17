@@ -28,6 +28,7 @@
   (:require [mailseq.source :as source]
             [mailseq.imap.connect :as imap-connect]
             [mailseq.imap.fetch :as imap-fetch]
+            [mailseq.imap.folder :as imap-folder]
             [mailseq.imap.idle :as imap-idle]
             [mailseq.maildir :as maildir]
             [mailseq.maildir.watch :as maildir-watch])
@@ -307,6 +308,28 @@
   [src]
   (when (instance? ImapSource src)
     (:conn src)))
+
+(defn uid-validity
+  "Return the UIDVALIDITY of the given folder as a long, or nil for
+  non-IMAP sources.
+
+  UIDVALIDITY is an IMAP concept (RFC 3501): the server assigns a value
+  per mailbox that changes when the UID sequence is no longer valid
+  (mailbox recreation, server migration). Callers persisting UIDs as
+  watermarks should persist the UIDVALIDITY seen at write time and
+  discard the watermark when it no longer matches — otherwise a silent
+  mismatch can cause every subsequent fetch to return nothing.
+
+  Example:
+    (let [uv-now    (uid-validity src \"INBOX\")
+          uv-stored (read-stored-uv)]
+      (when (not= uv-now uv-stored)
+        ;; UIDVALIDITY changed — reset the watermark before fetching.
+        ))"
+  [src folder-name]
+  (when (instance? ImapSource src)
+    (imap-folder/uid-validity (:conn src)
+                              (resolve-folder (:folders src) folder-name))))
 
 (defmacro with-source
   "Bind `sym` to `(open cfg)` for the extent of `body`, ensuring

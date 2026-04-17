@@ -415,6 +415,30 @@
       (is (nil? (mailseq/underlying-conn src))))))
 
 ;; ---------------------------------------------------------------------------
+;; uid-validity — IMAP-only escape hatch
+;; ---------------------------------------------------------------------------
+
+(deftest uid-validity-imap-returns-long
+  (mailseq/with-source [src (imap-cfg)]
+    (let [uv (mailseq/uid-validity src "INBOX")]
+      (testing "returns a positive long for IMAP"
+        (is (integer? uv))
+        (is (pos? uv)))
+      (testing "stable across calls on the same mailbox"
+        (is (= uv (mailseq/uid-validity src "INBOX")))))))
+
+(deftest uid-validity-maildir-returns-nil
+  (let [maildir-path (make-maildir-fixture)]
+    (mailseq/with-source [src {:type :maildir
+                               :folders {"INBOX" maildir-path}}]
+      (is (nil? (mailseq/uid-validity src "INBOX"))))))
+
+(deftest uid-validity-unknown-folder-throws
+  (mailseq/with-source [src (imap-cfg)]
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (mailseq/uid-validity src "no-such-folder")))))
+
+;; ---------------------------------------------------------------------------
 ;; watch-async — unified API
 ;; ---------------------------------------------------------------------------
 

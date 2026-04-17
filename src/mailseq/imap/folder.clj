@@ -4,7 +4,7 @@
 
 (ns mailseq.imap.folder
   "IMAP folder operations: list, open, close, and query folders."
-  (:import [jakarta.mail Folder Store]))
+  (:import [jakarta.mail Folder Store UIDFolder]))
 
 (defn list-folders
   "List all folders on the server. Returns a vector of maps with keys:
@@ -73,3 +73,26 @@
   [conn folder-name]
   (with-temp-folder* conn folder-name
     (fn [^Folder f] (.getUnreadMessageCount f))))
+
+(defn uid-validity
+  "Return the UIDVALIDITY of the named folder as a long.
+
+  UIDVALIDITY is assigned by the server (RFC 3501) and changes when the
+  mailbox's UID space is no longer valid — for example after a mailbox
+  recreation or a server migration. Callers persisting UIDs as watermarks
+  must persist UIDVALIDITY alongside and discard the watermark when the
+  value has changed, otherwise a stale watermark can silently skip every
+  new message."
+  [conn folder-name]
+  (with-temp-folder* conn folder-name
+    (fn [^Folder f] (.getUIDValidity ^UIDFolder f))))
+
+(defn uid-next
+  "Return the folder's UIDNEXT (the UID the next new message will receive),
+  or -1 if the server does not report it.
+
+  Useful for diagnosing a stuck watermark: if a caller's stored UID is
+  greater than UIDNEXT, UIDVALIDITY has almost certainly changed."
+  [conn folder-name]
+  (with-temp-folder* conn folder-name
+    (fn [^Folder f] (.getUIDNext ^UIDFolder f))))
